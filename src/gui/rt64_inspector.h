@@ -39,5 +39,10 @@ namespace RT64 {
         bool handleMessage(UINT msg, WPARAM wParam, LPARAM lParam);
 #   endif
         bool handleSdlEvent(SDL_Event *event);
+#   if defined(__EMSCRIPTEN__)
+        // How a page draws ImGui, through plume (rt64_inspector.cpp).
+        struct WebGPUContext;
+        std::unique_ptr<WebGPUContext> webgpuContext;
+#   endif
     };
 };
