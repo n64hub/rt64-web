@@ -1289,6 +1289,31 @@ namespace RT64 {
 
                 threadConfigurationValidate();
 
+#           if defined(__EMSCRIPTEN__)
+                // present-stats: every 5 s or so, how many game frames a second came and how many frames were drawn for them.
+                // A game slower than the rate it reports (viOriginalRate) is its own frames falling behind, on the CPU, where
+                // presents short of the display's rate can be either: Rush 2049's race on a phone reported 30 and came at
+                // 19-25, while RT64 drew 46 frames a second for them. The clock is read every 16th frame: on a phone each
+                // read is a trip out of wasm that costs.
+                if (ext.presentQueue->presentStats && !offscreenPass) {
+                    if ((statsGameFrames == 0) && (statsFramesDrawn == 0)) {
+                        statsStart = Timer::current();
+                    }
+
+                    statsGameFrames++;
+                    statsFramesDrawn += framesRendered;
+                    if ((statsGameFrames % 16) == 0) {
+                        const double seconds = Timer::deltaMicroseconds(statsStart, Timer::current()) / 1000000.0;
+                        if (seconds >= 5.0) {
+                            printf("RT64: %.1f game frames a second (the game reports %u), %.1f frames drawn for them\n", statsGameFrames / seconds,
+                                workload.viOriginalRate, statsFramesDrawn / seconds);
+                            statsGameFrames = 0;
+                            statsFramesDrawn = 0;
+                        }
+                    }
+                }
+#           endif
+
                 // The barrier stays on the frame before an offscreen pass, and catches up once the next frame is drawn.
                 if (offscreenPass) {
                     barrierHeld = true;
