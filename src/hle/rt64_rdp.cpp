@@ -388,6 +388,19 @@ namespace RT64 {
             TMEM[((tmemAddress + 2) ^ tmemXorMask) | UpperTMEM] = RDRAM[(textureAddress + (6 & offsetMask)) ^ 3];
             TMEM[((tmemAddress + 3) ^ tmemXorMask) | UpperTMEM] = RDRAM[(textureAddress + (7 & offsetMask)) ^ 3];
         }
+#if defined(__EMSCRIPTEN__)
+        // A word from a word-aligned address (nearly every load block and tile) as two 32-bit reads, byteswapped from
+        // RDRAM's order: a phone's draw-list thread spent 5% of its time copying textures a byte at a time. tmemAddress is
+        // a multiple of 8 here, so the xor mask (0 or 4) only swaps the two halves.
+        else if (!TLUT && ((textureAddress & 0x3) == 0) && ((tmemAddress & 0x7) == 0)) {
+            uint32_t words[2];
+            memcpy(words, &RDRAM[textureAddress], sizeof(words));
+            words[0] = __builtin_bswap32(words[0]);
+            words[1] = __builtin_bswap32(words[1]);
+            memcpy(&TMEM[tmemAddress ^ tmemXorMask], &words[0], 4);
+            memcpy(&TMEM[(tmemAddress + 4) ^ tmemXorMask], &words[1], 4);
+        }
+#endif
         else {
             // Copy the entire word.
             for (uint32_t i = 0; i < 8; i++) {
