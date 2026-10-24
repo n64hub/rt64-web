@@ -109,18 +109,18 @@ namespace RT64 {
 #   if RT64_WGSL
         DummyDepthTargets dummyDepthTargets;
 #   endif
-        std::unique_ptr<RenderQueryPool> queryPool;
-        FramebufferChangePool scratchFbChangePool;
-        ProfilingTimer rendererCPUProfiler = ProfilingTimer(120);
-        ProfilingTimer rendererGPUProfiler = ProfilingTimer(120);
-        ProfilingTimer matchingProfiler = ProfilingTimer(120);
-        ProfilingTimer workloadProfiler = ProfilingTimer(120);
 #   if defined(__EMSCRIPTEN__)
         // present-stats: the game frames since statsStart, and the frames drawn for them (renderThreadLoop()).
         uint32_t statsGameFrames = 0;
         uint32_t statsFramesDrawn = 0;
         Timestamp statsStart;
 #   endif
+        std::unique_ptr<RenderQueryPool> queryPool;
+        FramebufferChangePool scratchFbChangePool;
+        ProfilingTimer rendererCPUProfiler = ProfilingTimer(120);
+        ProfilingTimer rendererGPUProfiler = ProfilingTimer(120);
+        ProfilingTimer matchingProfiler = ProfilingTimer(120);
+        ProfilingTimer workloadProfiler = ProfilingTimer(120);
         std::array<GameFrame, 2> gameFrames;
         uint32_t prevFrameIndex = uint32_t(gameFrames.size()) - 1;
         uint32_t curFrameIndex = 0;
