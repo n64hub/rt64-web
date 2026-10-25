@@ -616,7 +616,7 @@ if (RT64_WGSL)
     build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantDualSource.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D DUAL_SOURCE_BLENDING")
     build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantMSDualSource.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D MULTISAMPLING" "-D DUAL_SOURCE_BLENDING")
     build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantFlatDualSource.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR" "-D DUAL_SOURCE_BLENDING")
-    build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantFlatMSDualSource.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_"-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR"_COLOR" "-D MULTISAMPLING" "-D DUAL_SOURCE_BLENDING")
+    build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantFlatMSDualSource.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR" "-D MULTISAMPLING" "-D DUAL_SOURCE_BLENDING")
     # The RasterPS the browser specializes at run time with override values (ShaderCacheWGSL, rt64_raster_shader.h)
     # keeps the ubershader's loops (SPEC_CONSTANT_LOOPS): nothing strips it of dead code before the browser parses all of
     # it, and Chrome parses a module on its GPU main thread, where every present waits behind it. The unrolled ones
