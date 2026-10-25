@@ -302,11 +302,6 @@ namespace RT64 {
         }
     }
     
-    bool WorkloadQueue::isWorkloadDone(uint64_t id) {
-        const std::scoped_lock lock(workloadIdMutex);
-        return (id <= workloadId);
-    }
-
     void WorkloadQueue::threadRenderFrame(GameFrame &curFrame, const GameFrame &prevFrame, const WorkloadConfiguration &workloadConfig,
         const DebuggerRenderer &debuggerRenderer, const DebuggerCamera &debuggerCamera, float curFrameWeight, float prevFrameWeight,
         float deltaTimeMs, RenderTargetKey overrideTargetKey, int32_t overrideTargetFbPairIndex, RenderTarget *overrideTarget,
@@ -936,6 +931,11 @@ namespace RT64 {
         }
 
         workloadIdCondition.notify_all();
+    }
+
+    bool WorkloadQueue::isWorkloadDone(uint64_t id) {
+        const std::scoped_lock lock(workloadIdMutex);
+        return (id <= workloadId);
     }
 
     void WorkloadQueue::renderThreadLoop() {
