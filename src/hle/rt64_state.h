@@ -125,6 +125,12 @@ namespace RT64 {
         std::vector<PendingRAMCopy> pendingRAMCopies;
         std::unordered_map<uint32_t, PendingRAMImage> pendingRAMImages;
         uint32_t lateRAMCopyCpuWrites = 0;
+
+        // Set by the RDP's full sync while fullSync() runs if the command after it ends the list at its top level (and
+        // the list then ends there, that command not read again): only then has the RSP read every command of the list
+        // by the time the RDP is done, so the game may be told so before the last batch is recorded
+        // (Application::Core::rdpDone) without the interpreter reading what it writes next.
+        bool listEndsAfterFullSync = false;
         GameConfiguration gameConfig;
         uint32_t displayListAddress;
         uint64_t displayListCounter;
@@ -180,6 +186,8 @@ namespace RT64 {
         void submitFramebufferPair(FramebufferPair::FlushReason flushReason);
         void checkRDRAM();
         void addPendingRAMCopy(Framebuffer *fb, uint32_t rowWidth, uint32_t rowStart, uint32_t rowEnd);
+        void keepPendingRAMImage(Framebuffer *fb, uint32_t rowWidth, uint32_t rowEnd);
+        const uint8_t *keptRAM(uint32_t address, uint32_t byteCount) const;
         void landRAMCopies(bool onlyIfReady);
         void fullSync();
         void fullSyncFramebufferPairTiles(Workload &workload, FramebufferPair &fbPair, uint32_t &loadOpCursor, uint32_t &rdpTileCursor);

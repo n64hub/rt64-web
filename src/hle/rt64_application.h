@@ -90,6 +90,11 @@ namespace RT64 {
 
             void (*checkInterrupts)();
 
+            // Optional: tells the game a list's RDP work is done before RT64 has recorded and submitted its workload, so
+            // the game goes on meanwhile (State::fullSync(), with render to RAM's late copy). Called on the thread that
+            // processes the list, once RDRAM holds nothing more RT64 reads for it.
+            void (*rdpDone)() = nullptr;
+
             VI decodeVI() const;
         };
 

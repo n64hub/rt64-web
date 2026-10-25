@@ -814,9 +814,12 @@ namespace RT64 {
 
     void State::addPendingRAMCopy(Framebuffer *fb, uint32_t rowWidth, uint32_t rowStart, uint32_t rowEnd) {
         pendingRAMCopies.push_back({ fb->addressStart, rowWidth, rowStart, rowEnd });
+        keepPendingRAMImage(fb, rowWidth, rowEnd);
+    }
 
-        // The list hasn't completed, so the game hasn't touched the framebuffer's memory since it was drawn: this is
-        // what the copy must find there when it lands.
+    void State::keepPendingRAMImage(Framebuffer *fb, uint32_t rowWidth, uint32_t rowEnd) {
+        // The game hasn't been told the list's RDP is done, so it hasn't touched the framebuffer's memory since it was
+        // drawn: this is what the copy must find there when it lands.
         PendingRAMImage &image = pendingRAMImages[fb->addressStart];
         if (image.words.empty()) {
             image.start = fb->addressStart & ~3U;
@@ -831,8 +834,23 @@ namespace RT64 {
         }
     }
 
+    const uint8_t *State::keptRAM(uint32_t address, uint32_t byteCount) const {
+        // Once the game has been told the list's RDP is done it may write to RDRAM, so the rest of the list reads a
+        // framebuffer's memory from what keepPendingRAMImage() kept of it before then.
+        for (const auto &it : pendingRAMImages) {
+            const PendingRAMImage &image = it.second;
+            if ((address >= image.start) && ((uint64_t(address) + byteCount) <= (uint64_t(image.start) + image.words.size() * 4))) {
+                return reinterpret_cast<const uint8_t *>(image.words.data()) + (address - image.start);
+            }
+        }
+
+        return &RDRAM[address];
+    }
+
     void State::landRAMCopies(bool onlyIfReady) {
         if (pendingRAMCopies.empty()) {
+            // What the early RDP done kept of a list that made no copy.
+            pendingRAMImages.clear();
             return;
         }
 
@@ -956,6 +974,7 @@ namespace RT64 {
         // Validate all tile copies to be used during the rendering.
         const bool extendedRenderToRAMSet = (extended.renderToRAM < UINT8_MAX);
         const bool renderToRDRAM = extendedRenderToRAMSet ? (extended.renderToRAM != 0) : ext.emulatorConfig->framebuffer.renderToRAM;
+        bool rdpToldDone = false;
         const bool warningsEnabled = ext.userConfig->developerMode;
         const bool linearFiltering = !ext.userConfig->threePointFiltering;
         const size_t callTileCount = workload.drawData.callTiles.size();
@@ -1535,7 +1554,7 @@ namespace RT64 {
                             uint32_t readRowCount = colorFb->height - colorFb->readHeight;
                             uint32_t readFbBytes = readRowBytes * readRowCount;
                             uint32_t storageAddress = colorImg.address + readRowBytes * colorFb->readHeight;
-                            workload.fbStorage.store(pairCursor, storageAddress, &RDRAM[storageAddress], readFbBytes);
+                            workload.fbStorage.store(pairCursor, storageAddress, rdpToldDone ? keptRAM(storageAddress, readFbBytes) : &RDRAM[storageAddress], readFbBytes);
                             FramebufferChange *colorFbChange = colorFb->readChangeFromStorage(ext.framebufferGraphicsWorker, workload.fbStorage, scratchFbChangePool, Framebuffer::Type::Color,
                                 colorImg.fmt, pairCursor, colorFb->readHeight, readRowCount, ext.shaderLibrary);
 
@@ -1579,7 +1598,7 @@ namespace RT64 {
                                 uint32_t readRowCount = depthFb->height - depthFb->readHeight;
                                 uint32_t readFbBytes = readRowBytes * readRowCount;
                                 uint32_t storageAddress = depthImg.address + readRowBytes * depthFb->readHeight;
-                                workload.fbStorage.store(pairCursor, storageAddress, &RDRAM[storageAddress], readFbBytes);
+                                workload.fbStorage.store(pairCursor, storageAddress, rdpToldDone ? keptRAM(storageAddress, readFbBytes) : &RDRAM[storageAddress], readFbBytes);
                                 FramebufferChange *depthFbChange = depthFb->readChangeFromStorage(ext.framebufferGraphicsWorker, workload.fbStorage, scratchFbChangePool, Framebuffer::Type::Depth,
                                     G_IM_FMT_DEPTH, pairCursor, depthFb->readHeight, readRowCount, ext.shaderLibrary);
 
@@ -1724,6 +1743,26 @@ namespace RT64 {
                 fullSyncFramebufferPairTiles(workload, fbPair, loadOpCursor, rdpTileCursor);
             }
 
+            // With the late copy every tile is loaded now, so all RT64 still reads of RDRAM for this list is the last
+            // batch's framebuffers, kept here whole (where its copies land, and what it reads of one it hasn't read yet,
+            // keptRAM()), and what the next list compares them with (hashTracking()). So if the list ends here the game
+            // is told the RDP is done before the batch is recorded and submitted, and goes on meanwhile. A copy still
+            // lands before the next list's RDP is done, at that list's start.
+            if (ext.emulatorConfig->framebuffer.renderToRAMLate && listEndsAfterFullSync && (ext.app->core.rdpDone != nullptr)) {
+                for (uint32_t f = framebufferPairCursor; f < workload.fbPairCount; f++) {
+                    if (getFramebufferPairs(f)) {
+                        keepPendingRAMImage(colorFb, colorFb->width, colorFb->height);
+                        if (depthFb != nullptr) {
+                            keepPendingRAMImage(depthFb, depthFb->width, depthFb->height);
+                        }
+                    }
+                }
+
+                framebufferManager.hashTracking(RDRAM);
+                rdpToldDone = true;
+                ext.app->core.rdpDone();
+            }
+
             // Render any remaining batches of framebuffers.
             renderAndSynchronize(workload.fbPairCount);
 
@@ -1768,7 +1807,9 @@ namespace RT64 {
             // Indicate to the texture cache it's safe to delete the textures if no locks are active.
             ext.textureCache->decrementLock();
 
-            framebufferManager.hashTracking(RDRAM);
+            if (!rdpToldDone) {
+                framebufferManager.hashTracking(RDRAM);
+            }
 
             advanceFramebufferRenderer();
 

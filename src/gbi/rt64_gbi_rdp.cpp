@@ -7,6 +7,10 @@
 #include "../include/rt64_extended_gbi.h"
 
 #include "rt64_f3d.h"
+#include "rt64_gbi_f3d.h"
+
+#include "hle/rt64_application.h"
+#include "hle/rt64_interpreter.h"
 
 namespace RT64 {
     namespace GBI_RDP {
@@ -254,8 +258,27 @@ namespace RT64 {
 
         void fullSync(State *state, DisplayList **dl) {
             RT64_LOG_PRINTF("GBI_RDP::fullSync()");
+
+            // Whether the next command ends the list at its top level (State::listEndsAfterFullSync), read before the
+            // game may be told the RDP is done (Application::Core::rdpDone) and write over it.
+            bool listEnds = false;
+            if (state->ext.app->core.rdpDone != nullptr) {
+                const Interpreter *interpreter = state->ext.interpreter;
+                const uint8_t nextOpCode = ((*dl) + 1)->w0 >> 24;
+                const bool nextExtended = (interpreter->extendedOpCode != 0) && (nextOpCode == interpreter->extendedOpCode);
+                listEnds = state->returnAddressStack.empty() && !nextExtended && (interpreter->hleGBI->map[nextOpCode] == &GBI_F3D::endDl);
+            }
+
+            state->listEndsAfterFullSync = listEnds;
             state->fullSync();
+            state->listEndsAfterFullSync = false;
             state->dpInterrupt();
+
+            // The list ends here as that end command would end it, which isn't read again: the game may have been told
+            // the RDP is done and have written its next list over it.
+            if (listEnds) {
+                *dl = nullptr;
+            }
         }
 
         void getTrianglePointers(DisplayList *triangleData, size_t arrayLength, DisplayList *&trianglesEnd, std::vector<const DisplayList *> &triPointers, bool &overrun) {
