@@ -459,10 +459,13 @@ namespace RT64 {
         };
 
         // As an optimization for large texture loads that end up wrapping around in TMEM, we skip rows that have no effect in the final result.
-        if ((tmemStride > 0) && ((wordsPerRow * tmemAdvance) <= tmemStride)) {
+        // The rows kept cover every word a skipped row wrote only where the rows have no gaps between them, or where the stride divides
+        // TMEM and each skipped row's words are written again by a kept row: elsewhere a skipped row's words in a gap would be lost.
+        const uint32_t rowBytes = wordsPerRow * tmemAdvance;
+        if ((tmemStride > 0) && ((rowBytes == tmemStride) || ((rowBytes < tmemStride) && (((tmemMask + 1) % tmemStride) == 0)))) {
             int32_t rowsToSkip = rowCount - (tmemMask + tmemStride) / tmemStride;
             if (rowsToSkip > 0) {
-                tmemAddressRow += (tmemAddressRow + tmemStride * rowsToSkip) & tmemMask;
+                tmemAddressRow = (tmemAddressRow + tmemStride * rowsToSkip) & tmemMask;
                 textureAddressRow += textureStride * rowsToSkip;
                 tmemXorMask = (rowsToSkip & 0x1) << 2;
                 rowCount -= rowsToSkip;
