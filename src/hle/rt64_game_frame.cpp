@@ -3,7 +3,6 @@
 //
 
 #include <algorithm>
-#include <tuple>
 
 #include "common/rt64_math.h"
 
@@ -594,7 +593,11 @@ namespace RT64 {
             uint32_t maxWorldMatrix;
 
             bool operator<(const CallMatrices &o) const {
-                return std::tie(workloadIndex, minWorldMatrix, maxWorldMatrix) < std::tie(o.workloadIndex, o.minWorldMatrix, o.maxWorldMatrix);
+                if (workloadIndex != o.workloadIndex) {
+                    return workloadIndex < o.workloadIndex;
+                }
+
+                return (minWorldMatrix != o.minWorldMatrix) ? (minWorldMatrix < o.minWorldMatrix) : (maxWorldMatrix < o.maxWorldMatrix);
             }
 
             bool operator==(const CallMatrices &o) const {
