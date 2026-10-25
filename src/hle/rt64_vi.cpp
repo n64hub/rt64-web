@@ -190,10 +190,9 @@ namespace RT64 {
         // frames late, and now and then a game frame is not shown. At the fastest such a game got one drawn frame a game
         // frame on a 60 Hz display (the game's rate the display's, nothing to interpolate), presents about the game's
         // rate. A game at 30 mixing frames of 2 and 3 VIs is interpolated at the fastest however often it takes 3: there
-        // it already draws two frames a game frame, and a third costs the workload thread more than it shows (such a
-        // game on a phone drew 50 frames a second for its 29 at the slowest, 57 at the fastest). Only while the slowest
-        // took at most twice the VIs of the fastest, so a load's frame of dozens of VIs leaves its frames uninterpolated
-        // as before: RT64 keeps a color target for every display frame of a game frame.
+        // it already draws two frames a game frame, and a third costs the workload thread more than it shows. Only while
+        // the slowest took at most twice the VIs of the fastest, so a load's frame of dozens of VIs leaves its frames
+        // uninterpolated as before: RT64 keeps a color target for every display frame of a game frame.
         const auto range = std::minmax_element(factors.begin(), factors.end());
         if ((*range.first != 0) && (*range.second <= (*range.first * 2))) {
             const uint32_t slowest = *range.second;

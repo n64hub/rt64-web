@@ -538,7 +538,7 @@ if (RT64_FREE_DISCARDED_TARGETS OR RT64_WGSL)
     target_compile_definitions(rt64 PRIVATE RT64_FREE_DISCARDED_TARGETS=1)
 endif()
 if (RT64_UNEVEN_FRAME_RATES OR RT64_WGSL)
-    target_compile_definitions(rt64 PRIVATE RT64_UNEVEN_FRAME_RATES=1)
+    target_compile_definitions(rt64 PUBLIC RT64_UNEVEN_FRAME_RATES=1)
 endif()
 
 # Add common libraries.
