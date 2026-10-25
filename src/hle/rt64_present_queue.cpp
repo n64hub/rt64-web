@@ -700,6 +700,7 @@ namespace RT64 {
 
         int processCursor = -1;
         bool skipPresent = false;
+        bool newerQueued = false;
         uint32_t displayTimingRate = UINT32_MAX;
         const bool displayTiming = ext.device->getCapabilities().displayTiming;
         bool swapChainValid = !ext.swapChain->needsResize();
@@ -715,7 +716,12 @@ namespace RT64 {
                 if (presentThreadRunning) {
                     processCursor = threadCursor;
                     threadCursor = (threadCursor + 1) % presents.size();
-                    skipPresent = (writeCursor != threadCursor);
+#               if defined(__EMSCRIPTEN__)
+                    // Decided once this present's workload is done (below).
+                    newerQueued = false;
+#               else
+                    newerQueued = (writeCursor != threadCursor);
+#               endif
                 }
             }
 
@@ -727,11 +733,6 @@ namespace RT64 {
                 }
                 else if (!lastPresentDropped) {
                     busyFrames++;
-                }
-
-                lastPresentDropped = skipPresent;
-                if (skipPresent) {
-                    reportDroppedPresent(processCursor, threadCursor);
                 }
             }
 
@@ -773,7 +774,7 @@ namespace RT64 {
                     }
                 }
 
-                skipPresent = skipPresent || ext.swapChain->isEmpty();
+                skipPresent = newerQueued || ext.swapChain->isEmpty();
 
 #           if defined(__EMSCRIPTEN__)
                 // A hidden page shows nothing, and in Chrome a present's wait could hold this thread for seconds there
@@ -789,6 +790,27 @@ namespace RT64 {
 
                 if (!presentThreadRunning) {
                     continue;
+                }
+
+#           if defined(__EMSCRIPTEN__)
+                // A present is dropped for a newer one only if the newer one's workload is done too, so it can be shown in
+                // its place now. Decided when this one was taken from the queue, before its workload, a page whose workloads
+                // end later than the game's next present comes (a phone's CPU, slowed by its heat, at a level's start) found
+                // a newer one queued each time and dropped every present: Banjo-Tooie on a Galaxy S21 went on at 15-20 game
+                // frames a second showing none, for good. Workloads end in order, so the next one is the one to look at.
+                {
+                    const std::scoped_lock cursorLock(cursorMutex);
+                    newerQueued = (writeCursor != threadCursor) && ext.workloadQueue->isWorkloadDone(presents[threadCursor].workloadId);
+                }
+
+                skipPresent = skipPresent || newerQueued;
+#           endif
+
+                if (presentStats) {
+                    lastPresentDropped = newerQueued;
+                    if (newerQueued) {
+                        reportDroppedPresent(processCursor, threadCursor);
+                    }
                 }
 
 #           if defined(__EMSCRIPTEN__)

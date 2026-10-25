@@ -95,6 +95,11 @@ namespace RT64 {
         });
     }
 
+    bool WorkloadQueue::isWorkloadDone(uint64_t id) {
+        const std::scoped_lock lock(workloadIdMutex);
+        return (id <= workloadId);
+    }
+
     void WorkloadQueue::setup(const External &ext) {
         this->ext = ext;
 
