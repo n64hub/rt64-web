@@ -195,11 +195,14 @@ namespace RT64 {
                 }
 
                 if (loadTile.siz == G_IM_SIZ_4b) {
-                    for (uint32_t v = 0; v < 256; v++) {
-                        if ((byteBitset[v >> 6] >> (v & 0x3FU)) & 1) {
-                            tlutBitset[0] |= (1ULL << (v & 0xFU)) | (1ULL << (v >> 4U));
-                        }
+                    // Byte v uses indices v & 0xF and v >> 4: the low ones are the OR of the set's 16-bit pieces, and
+                    // high index h is used when piece h (bytes h * 16 to h * 16 + 15) isn't empty.
+                    uint64_t nibbles = 0;
+                    for (uint32_t h = 0; h < 16; h++) {
+                        const uint64_t piece = (byteBitset[h >> 2] >> ((h & 3) * 16)) & 0xFFFFU;
+                        nibbles |= piece | (uint64_t(piece != 0) << h);
                     }
+                    tlutBitset[0] |= nibbles;
                 }
                 else {
                     memcpy(tlutBitset, byteBitset, sizeof(tlutBitset));
@@ -228,12 +231,22 @@ namespace RT64 {
                                 xxh3.update(&TMEM[paletteAddress + i * 0x200], 0x200);
                             }
                             else {
-                                // Must check every bit individually.
-                                while (tlutBitset[i] > 0) {
-                                    bitsetIndex = bitScanForward64(tlutBitset[i]);
+                                // Each run of used indices in one update, as their palette bytes are side by side, and a lone
+                                // one as 8 bytes.
+                                uint64_t bits = tlutBitset[i];
+                                while (bits > 0) {
+                                    bitsetIndex = bitScanForward64(bits);
                                     paletteIndex = (i * 0x40) + bitsetIndex;
-                                    xxh3.update(&TMEM[paletteAddress + paletteIndex * 8], 8);
-                                    tlutBitset[i] &= ~(1ULL << bitsetIndex);
+                                    if (((bits >> bitsetIndex) & 2) == 0) {
+                                        xxh3.update(&TMEM[paletteAddress + paletteIndex * 8], 8);
+                                        bits &= bits - 1;
+                                        continue;
+                                    }
+
+                                    const uint64_t above = ~(bits >> bitsetIndex);
+                                    const uint32_t runLength = (above == 0) ? (64 - bitsetIndex) : bitScanForward64(above);
+                                    xxh3.update(&TMEM[paletteAddress + paletteIndex * 8], runLength * 8);
+                                    bits = ((bitsetIndex + runLength) >= 64) ? 0 : (bits & (~0ULL << (bitsetIndex + runLength)));
                                 }
                             }
                         }
