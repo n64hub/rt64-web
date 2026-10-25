@@ -154,6 +154,10 @@ namespace RT64 {
         factorCursor = 0;
         history.fill({});
         factors.fill(0);
+#   if RT64_UNEVEN_FRAME_RATES
+        recentCursor = 0;
+        recentFactors.fill(0);
+#   endif
     }
 
     void VIHistory::pushVI(const VI &vi, uint32_t fbWidth) {
@@ -166,6 +170,10 @@ namespace RT64 {
     void VIHistory::pushFactor(uint32_t factor) {
         factorCursor = (factorCursor + 1) % factors.size();
         factors[factorCursor] = factor;
+#   if RT64_UNEVEN_FRAME_RATES
+        recentCursor = (recentCursor + 1) % recentFactors.size();
+        recentFactors[recentCursor] = factor;
+#   endif
     }
 
     uint32_t VIHistory::logicalRateFromFactors() {
@@ -175,13 +183,19 @@ namespace RT64 {
         }
 #   if RT64_UNEVEN_FRAME_RATES
         // With RT64_UNEVEN_FRAME_RATES frames that took an uneven number of VIs (a game at 30 dropping to 20 when a frame
-        // runs long, or VIs that come unevenly) are interpolated at the fastest of them, not left uninterpolated: a frame
-        // that comes later holds the last interpolated frame until it does, and none is cut short by the next. Only while
-        // the slowest took at most twice the VIs of the fastest, so a load's frame of dozens of VIs leaves its frames
-        // uninterpolated as before: RT64 keeps a color target for every display frame of a game frame.
+        // runs long, or VIs that come unevenly) are interpolated, not left uninterpolated. At the fastest of the last
+        // three, so a frame that comes later holds the last interpolated frame until it does; but at the slowest of them
+        // while it took 3 or more of the last 8 frames, a game that keeps mixing them (a game at 60 that a phone's CPU
+        // holds to 30-50 mixes frames of 1 and 2 VIs): a frame that comes sooner shows its frames late, and now and then
+        // a game frame is not shown. At the fastest such a game got one drawn frame a game frame on a 60 Hz display (the
+        // game's rate the display's, nothing to interpolate), presents about the game's rate. Only while the slowest
+        // took at most twice the VIs of the fastest, so a load's frame of dozens of VIs leaves its frames uninterpolated
+        // as before: RT64 keeps a color target for every display frame of a game frame.
         const auto range = std::minmax_element(factors.begin(), factors.end());
         if ((*range.first != 0) && (*range.second <= (*range.first * 2))) {
-            return FullRate / *range.first;
+            const uint32_t slowest = *range.second;
+            const auto slow = std::count_if(recentFactors.begin(), recentFactors.end(), [&](uint32_t factor) { return factor >= slowest; });
+            return FullRate / ((slow >= 3) ? slowest : *range.first);
         }
 #   endif
         return 0;

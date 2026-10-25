@@ -163,6 +163,11 @@ namespace RT64 {
         std::array<uint32_t, 3> factors;
         int historyCursor;
         int factorCursor;
+#   if RT64_UNEVEN_FRAME_RATES
+        // The last frames' VIs, for how many took the slowest of the last three's (logicalRateFromFactors).
+        std::array<uint32_t, 8> recentFactors;
+        int recentCursor;
+#   endif
 
         VIHistory();
         void pushVI(const VI &vi, uint32_t fbWidth);
