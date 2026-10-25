@@ -133,7 +133,6 @@ namespace RT64 {
         uint32_t previousWriteCursor() const;
         void waitForIdle();
         void waitForWorkloadId(uint64_t waitId);
-        bool isWorkloadDone(uint64_t id);
         void setup(const External &ext);
         void updateMultisampling();
         void threadConfigurationUpdate(hlslpp::uint2 viFbSize, WorkloadConfiguration &workloadConfig);
@@ -147,5 +146,6 @@ namespace RT64 {
         void threadAdvanceWorkloadId(uint64_t newWorkloadId);
         void renderThreadLoop();
         void idleThreadLoop();
+        bool isWorkloadDone(uint64_t id);
     };
 };
