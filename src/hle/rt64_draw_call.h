@@ -146,6 +146,12 @@ namespace RT64 {
         interop::int2 maxTexcoord;
         bool syncRequired;
         bool tileCopyUsed;
+#   if defined(__EMSCRIPTEN__)
+        // The tile copy is of a framebuffer row (FramebufferManager::checkRowTileCopy), and the TMEM hash to sample if the
+        // call's texcoords leave it.
+        bool rowTileCopy;
+        uint64_t rowTileFallbackHash;
+#   endif
         uint16_t tileCopyWidth;
         uint16_t tileCopyHeight;
         bool reinterpretTile;

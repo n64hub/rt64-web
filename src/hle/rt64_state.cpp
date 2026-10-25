@@ -371,6 +371,24 @@ namespace RT64 {
                     checkResult = framebufferManager.checkRegionsTMEM(checkTMEMStart, checkTMEMEnd, dstCallTile.lineWidth, tile.siz, tile.fmt, tile.uls, usesTLUT, tile.palette);
                     dstCallTile.syncRequired = checkResult.syncRequired;
 
+#               if defined(__EMSCRIPTEN__)
+                    // A framebuffer row loaded as a block at the tile's TMEM address can be sampled from its tile copy
+                    // whatever the tile's size and line say, which only bound what it could sample: whether the call's
+                    // texcoords stay inside the row is checked in fullSync(), as for any tile copy. Perfect Dark's night
+                    // vision copies each of the framebuffer's rows this way through a 513x9 tile of line 160, which checks
+                    // all of TMEM against a line twice the row's, so without this each row's texture came from RDRAM:
+                    // ~250 TMEM uploads a frame, each waiting for the GPU to write the framebuffer back first.
+                    dstCallTile.rowTileCopy = false;
+                    if (gpuCopiesEnabled && !checkResult.valid() && !RGBA32 && !usesTLUT) {
+                        const FramebufferManager::CheckCopyResult rowResult = framebufferManager.checkRowTileCopy(tile.tmem, tile.siz, tile.fmt);
+                        if (rowResult.valid()) {
+                            dstCallTile.rowTileCopy = true;
+                            dstCallTile.rowTileFallbackHash = rdp->tileReplacementHashes[tileIndex];
+                            checkResult = rowResult;
+                        }
+                    }
+#               endif
+
                     if (gpuCopiesEnabled && checkResult.valid()) {
                         dstCallTile.tileCopyUsed = true;
                         dstCallTile.tmemHashOrID = checkResult.tileId;
@@ -1070,6 +1088,13 @@ namespace RT64 {
                 const bool insufficientHeight = (maxTexcoord.y > callTile.tileCopyHeight);
                 if (insufficientWidth || insufficientHeight) {
                     callTile.tileCopyUsed = false;
+#               if defined(__EMSCRIPTEN__)
+                    // A row's tile copy that the texcoords leave samples TMEM's contents as before. The sync this needs
+                    // is the one the original check asked for (syncRequired).
+                    if (callTile.rowTileCopy) {
+                        callTile.tmemHashOrID = callTile.rowTileFallbackHash;
+                    }
+#               endif
                 }
                 else {
                     callTile.rawTMEM = false;

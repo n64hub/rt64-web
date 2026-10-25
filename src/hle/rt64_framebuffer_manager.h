@@ -199,6 +199,9 @@ namespace RT64 {
             interop::uint2 texelShift, interop::uint2 texelMask, uint64_t tlutHash, uint32_t tlutFormat);
 
         CheckCopyResult checkRegionsTMEM(uint32_t tmemStart, uint32_t tmemEnd, uint32_t lineWidth, uint8_t siz, uint8_t fmt, uint16_t uls, bool usesTLUT, uint8_t palette);
+#   if defined(__EMSCRIPTEN__)
+        CheckCopyResult checkRowTileCopy(uint32_t tmemStart, uint8_t siz, uint8_t fmt) const;
+#   endif
         void insertRegionsTMEM(uint32_t addressStart, uint32_t tmemStart, uint32_t tmemWords, uint32_t tmemMask, bool RGBA32, bool syncRequired, std::vector<RegionIterator> *resultRegions);
         void discardRegionsTMEM(uint32_t tmemStart, uint32_t tmemWords, uint32_t tmemMask);
         void synchronizeRegionsTMEM();

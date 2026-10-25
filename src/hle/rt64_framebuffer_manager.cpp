@@ -633,6 +633,37 @@ namespace RT64 {
         }
     }
 
+#if defined(__EMSCRIPTEN__)
+    // The tile copy of one framebuffer row of 16 or 32 bits loaded whole at tmemStart, if there is one, as a tile one row
+    // high: the row is the same texels whatever line the sampling tile has. A row loaded by a block (LoadBlock) has no
+    // line of its own, so checkRegionsTMEM() only finds it for a tile whose line and sampled range match the row's.
+    FramebufferManager::CheckCopyResult FramebufferManager::checkRowTileCopy(uint32_t tmemStart, uint8_t siz, uint8_t fmt) const {
+        CheckCopyResult result;
+        for (const RegionTMEM &region : activeRegionsTMEM) {
+            const FramebufferTile &fbTile = region.fbTile;
+            if ((region.tmemStart != tmemStart) || !fbTile.valid() || ((fbTile.bottom - fbTile.top) != 1) || (fbTile.siz != siz) || (fbTile.fmt != fmt) || (siz < G_IM_SIZ_16b)) {
+                continue;
+            }
+
+            const uint32_t tileWidth = fbTile.right - fbTile.left;
+            const uint32_t loadedTexels = ((region.tmemEnd - region.tmemStart) << 3) / (1U << siz >> 1);
+            if (loadedTexels < tileWidth) {
+                continue;
+            }
+
+            result.tileId = region.tileCopyId;
+            result.tileWidth = tileWidth;
+            result.lineWidth = tileWidth;
+            result.tileHeight = 1;
+            result.fmt = fbTile.fmt;
+            result.siz = fbTile.siz;
+            break;
+        }
+
+        return result;
+    }
+#endif
+
     FramebufferManager::CheckCopyResult FramebufferManager::checkRegionsTMEM(uint32_t tmemStart, uint32_t tmemEnd, uint32_t lineWidth, uint8_t siz, uint8_t fmt, uint16_t uls, bool usesTLUT, uint8_t palette) {
         const bool RGBA32 = (siz == G_IM_SIZ_32b) && (fmt == G_IM_FMT_RGBA);
         CheckCopyResult result;
