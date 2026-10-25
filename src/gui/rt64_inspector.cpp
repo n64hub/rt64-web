@@ -67,9 +67,11 @@ namespace RT64 {
 #if defined(__EMSCRIPTEN__)
     // A page has only WebGPU, and its device belongs to the page's main thread (plume_device_thread.h), so ImGui's own
     // WebGPU backend, which calls WebGPU on whatever thread renders, can't draw there. The inspector draws ImGui's lists
-    // through plume instead, as RT64 draws everything else: the font atlas is a texture, each frame's vertices and
-    // indices go in upload buffers, and one WGSL pipeline draws each command clipped to its rectangle. The font atlas
-    // is the one texture it has, so a command drawing any other ImTextureID (a desktop backend's handle) is skipped.
+    // through plume instead, as RT64 draws everything else: ImGui's textures are textures of its own, each frame's
+    // vertices and indices go in upload buffers, and one WGSL pipeline draws each command clipped to its rectangle.
+    // Before ImGui 1.92 its one texture is the font atlas; from 1.92 (IMGUI_HAS_TEXTURES) ImGui asks it to make, update
+    // and destroy each texture it draws, its font atlases. A command drawing any other ImTextureID (a desktop backend's
+    // handle) is skipped.
     static const char WebGPUInspectorShader[] = R"(
 struct PushConstants {
     scale: vec2<f32>,
@@ -102,13 +104,24 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
 )";
 
     struct Inspector::WebGPUContext {
+        // A texture ImGui draws, its ImTextureID the descriptor set that binds it.
+        struct Texture {
+            std::unique_ptr<RenderTexture> texture;
+            std::unique_ptr<RenderDescriptorSet> descriptorSet;
+
+            ImTextureID id() const {
+                return ImTextureID(descriptorSet.get());
+            }
+        };
+
         RenderDevice *device = nullptr;
         RenderDescriptorSetBuilder descriptorSetBuilder;
         std::unique_ptr<RenderSampler> sampler;
         std::unique_ptr<RenderPipelineLayout> pipelineLayout;
         std::unique_ptr<RenderPipeline> pipeline;
-        std::unique_ptr<RenderTexture> fontTexture;
-        std::unique_ptr<RenderDescriptorSet> fontDescriptorSet;
+#   if !defined(IMGUI_HAS_TEXTURES)
+        std::unique_ptr<Texture> fontTexture;
+#   endif
         std::unique_ptr<RenderBuffer> vertexBuffer;
         std::unique_ptr<RenderBuffer> indexBuffer;
         uint64_t vertexBufferSize = 0;
@@ -158,40 +171,111 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
             pipeline = device->createGraphicsPipeline(pipelineDesc);
         }
 
+        ~WebGPUContext() {
+#       if defined(IMGUI_HAS_TEXTURES)
+            // As ImGui's own backends shut down: each texture no other context uses is destroyed, so none keeps its ID.
+            for (ImTextureData *tex : ImGui::GetPlatformIO().Textures) {
+                if (tex->RefCount == 1) {
+                    destroyTexture(tex);
+                }
+            }
+#       endif
+        }
+
+        std::unique_ptr<Texture> createTexture(uint32_t width, uint32_t height) {
+            std::unique_ptr<Texture> texture = std::make_unique<Texture>();
+            texture->texture = device->createTexture(RenderTextureDesc::Texture2D(width, height, 1, RenderFormat::R8G8B8A8_UNORM));
+            texture->descriptorSet = descriptorSetBuilder.create(device);
+            texture->descriptorSet->setTexture(0, texture->texture.get(), RenderTextureLayout::SHADER_READ);
+            texture->descriptorSet->setSampler(1, sampler.get());
+            return texture;
+        }
+
+        // Copies a rectangle of RGBA pixels, each row pitch bytes after the one above, into the texture at x, y, with a
+        // worker of its own: a draw that asks for one is inside the present's render pass.
+        void upload(Texture &texture, const uint8_t *pixels, uint32_t pitch, uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+            if ((width == 0) || (height == 0)) {
+                return;
+            }
+
+            const uint32_t rowPitch = width * 4;
+            const uint32_t alignedRowPitch = (rowPitch + 255) & ~255U;
+            std::unique_ptr<RenderBuffer> uploadBuffer = device->createBuffer(RenderBufferDesc::UploadBuffer(uint64_t(alignedRowPitch) * height));
+            uint8_t *uploadData = reinterpret_cast<uint8_t *>(uploadBuffer->map());
+            for (uint32_t row = 0; row < height; row++) {
+                memcpy(uploadData + uint64_t(alignedRowPitch) * row, pixels + uint64_t(pitch) * row, rowPitch);
+            }
+
+            uploadBuffer->unmap();
+
+            RenderWorker worker(device, "Inspector texture", RenderCommandListType::DIRECT);
+            RenderWorkerExecution execution(&worker);
+            worker.commandList->barriers(RenderBarrierStage::COPY, RenderTextureBarrier(texture.texture.get(), RenderTextureLayout::COPY_DEST));
+            worker.commandList->copyTextureRegion(RenderTextureCopyLocation::Subresource(texture.texture.get()), RenderTextureCopyLocation::PlacedFootprint(uploadBuffer.get(), RenderFormat::R8G8B8A8_UNORM, width, height, 1, alignedRowPitch / 4), x, y);
+            worker.commandList->barriers(RenderBarrierStage::GRAPHICS, RenderTextureBarrier(texture.texture.get(), RenderTextureLayout::SHADER_READ));
+        }
+
+#   if defined(IMGUI_HAS_TEXTURES)
+        // ImGui 1.92 and later make their textures through the backend (ImGuiBackendFlags_RendererHasTextures): the font
+        // atlas, a bigger one as it grows, and the glyphs it adds as they are first drawn. The draw does what each one
+        // asks first, as ImGui's own backends do, with the Texture kept in its BackendUserData.
+        void updateTexture(ImTextureData *tex) {
+            if (tex->Status == ImTextureStatus_WantCreate) {
+                assert(tex->Format == ImTextureFormat_RGBA32);
+                Texture *texture = createTexture(tex->Width, tex->Height).release();
+                tex->SetTexID(texture->id());
+                tex->BackendUserData = texture;
+            }
+
+            if ((tex->Status == ImTextureStatus_WantCreate) || (tex->Status == ImTextureStatus_WantUpdates)) {
+                const bool whole = (tex->Status == ImTextureStatus_WantCreate);
+                const uint32_t x = whole ? 0 : tex->UpdateRect.x;
+                const uint32_t y = whole ? 0 : tex->UpdateRect.y;
+                const uint32_t width = whole ? tex->Width : tex->UpdateRect.w;
+                const uint32_t height = whole ? tex->Height : tex->UpdateRect.h;
+                upload(*static_cast<Texture *>(tex->BackendUserData), reinterpret_cast<const uint8_t *>(tex->GetPixelsAt(x, y)), tex->GetPitch(), x, y, width, height);
+                tex->SetStatus(ImTextureStatus_OK);
+            }
+
+            if ((tex->Status == ImTextureStatus_WantDestroy) && (tex->UnusedFrames > 0)) {
+                destroyTexture(tex);
+            }
+        }
+
+        static void destroyTexture(ImTextureData *tex) {
+            delete static_cast<Texture *>(tex->BackendUserData);
+            tex->SetTexID(ImTextureID_Invalid);
+            tex->BackendUserData = nullptr;
+            tex->SetStatus(ImTextureStatus_Destroyed);
+        }
+#   else
         // Makes the font atlas's texture once ImGui has built the atlas, and again whenever the program rebuilds it (a
         // font added, a new size), as the desktop backends' NewFrame() does.
         void updateFontTexture() {
             ImFontAtlas *fonts = ImGui::GetIO().Fonts;
-            if ((fontDescriptorSet != nullptr) && fonts->IsBuilt() && (fonts->TexID == ImTextureID(fontDescriptorSet.get()))) {
+            if ((fontTexture != nullptr) && fonts->IsBuilt() && (fonts->TexID == fontTexture->id())) {
                 return;
             }
 
             unsigned char *pixels = nullptr;
             int width = 0, height = 0;
             fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
-            const uint32_t rowPitch = uint32_t(width) * 4;
-            const uint32_t alignedRowPitch = (rowPitch + 255) & ~255U;
-            std::unique_ptr<RenderBuffer> uploadBuffer = device->createBuffer(RenderBufferDesc::UploadBuffer(uint64_t(alignedRowPitch) * height));
-            uint8_t *uploadData = reinterpret_cast<uint8_t *>(uploadBuffer->map());
-            for (int y = 0; y < height; y++) {
-                memcpy(uploadData + uint64_t(alignedRowPitch) * y, pixels + uint64_t(rowPitch) * y, rowPitch);
-            }
+            fontTexture = createTexture(width, height);
+            upload(*fontTexture, pixels, uint32_t(width) * 4, 0, 0, width, height);
+            fonts->SetTexID(fontTexture->id());
+        }
+#   endif
 
-            uploadBuffer->unmap();
-
-            fontTexture = device->createTexture(RenderTextureDesc::Texture2D(width, height, 1, RenderFormat::R8G8B8A8_UNORM));
-            {
-                RenderWorker worker(device, "Inspector font", RenderCommandListType::DIRECT);
-                RenderWorkerExecution execution(&worker);
-                worker.commandList->barriers(RenderBarrierStage::COPY, RenderTextureBarrier(fontTexture.get(), RenderTextureLayout::COPY_DEST));
-                worker.commandList->copyTextureRegion(RenderTextureCopyLocation::Subresource(fontTexture.get()), RenderTextureCopyLocation::PlacedFootprint(uploadBuffer.get(), RenderFormat::R8G8B8A8_UNORM, width, height, 1, alignedRowPitch / 4));
-                worker.commandList->barriers(RenderBarrierStage::GRAPHICS, RenderTextureBarrier(fontTexture.get(), RenderTextureLayout::SHADER_READ));
-            }
-
-            fontDescriptorSet = descriptorSetBuilder.create(device);
-            fontDescriptorSet->setTexture(0, fontTexture.get(), RenderTextureLayout::SHADER_READ);
-            fontDescriptorSet->setSampler(1, sampler.get());
-            fonts->SetTexID(ImTextureID(fontDescriptorSet.get()));
+        // The descriptor set a command draws with, or none for a texture that is not one of the backend's own (an
+        // ImTextureID a desktop backend made).
+        RenderDescriptorSet *descriptorSetFor(const ImDrawCmd &drawCmd) const {
+#       if defined(IMGUI_HAS_TEXTURES)
+            const ImTextureData *tex = drawCmd.TexRef._TexData;
+            const Texture *texture = (tex != nullptr) ? static_cast<const Texture *>(tex->BackendUserData) : nullptr;
+            return (texture != nullptr) ? texture->descriptorSet.get() : nullptr;
+#       else
+            return ((fontTexture != nullptr) && (drawCmd.GetTexID() == fontTexture->id())) ? fontTexture->descriptorSet.get() : nullptr;
+#       endif
         }
 
         void setRenderState(RenderCommandList *commandList, const ImDrawData *drawData, uint32_t width, uint32_t height, uint32_t vertexBytes, uint32_t indexBytes) {
@@ -210,7 +294,6 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
             commandList->setPipeline(pipeline.get());
             commandList->setGraphicsPipelineLayout(pipelineLayout.get());
             commandList->setGraphicsPushConstants(0, pushConstants);
-            commandList->setGraphicsDescriptorSet(fontDescriptorSet.get(), 0);
             commandList->setVertexBuffers(0, &vertexBufferView, 1, &inputSlot);
             commandList->setIndexBuffer(&indexBufferView);
         }
@@ -219,7 +302,17 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
         // it. The present waits for its list before it records the next (RT64's PresentQueue), so one pair of upload
         // buffers does for every frame.
         void draw(RenderCommandList *commandList, ImDrawData *drawData, uint32_t width, uint32_t height) {
-            if ((fontDescriptorSet == nullptr) || (drawData->TotalVtxCount <= 0) || (drawData->DisplaySize.x <= 0.0f) || (drawData->DisplaySize.y <= 0.0f) || (width == 0) || (height == 0)) {
+#       if defined(IMGUI_HAS_TEXTURES)
+            if (drawData->Textures != nullptr) {
+                for (ImTextureData *tex : *drawData->Textures) {
+                    if (tex->Status != ImTextureStatus_OK) {
+                        updateTexture(tex);
+                    }
+                }
+            }
+#       endif
+
+            if ((drawData->TotalVtxCount <= 0) || (drawData->DisplaySize.x <= 0.0f) || (drawData->DisplaySize.y <= 0.0f) || (width == 0) || (height == 0)) {
                 return;
             }
 
@@ -253,7 +346,7 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
 
             const float scaleX = float(width) / drawData->DisplaySize.x;
             const float scaleY = float(height) / drawData->DisplaySize.y;
-            const ImTextureID fontTextureId = ImTextureID(fontDescriptorSet.get());
+            const RenderDescriptorSet *boundDescriptorSet = nullptr;
             int32_t vertexOffset = 0;
             uint32_t indexOffset = 0;
             for (int i = 0; i < drawData->CmdListsCount; i++) {
@@ -262,6 +355,7 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
                     if (drawCmd.UserCallback != nullptr) {
                         if (drawCmd.UserCallback == ImDrawCallback_ResetRenderState) {
                             setRenderState(commandList, drawData, width, height, vertexBytes, indexBytes);
+                            boundDescriptorSet = nullptr;
                         }
                         else {
                             drawCmd.UserCallback(drawList, &drawCmd);
@@ -270,7 +364,8 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
                         continue;
                     }
 
-                    if (drawCmd.GetTexID() != fontTextureId) {
+                    RenderDescriptorSet *descriptorSet = descriptorSetFor(drawCmd);
+                    if (descriptorSet == nullptr) {
                         continue;
                     }
 
@@ -280,6 +375,11 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
                     const int32_t bottom = std::min(int32_t((drawCmd.ClipRect.w - drawData->DisplayPos.y) * scaleY), int32_t(height));
                     if ((left >= right) || (top >= bottom)) {
                         continue;
+                    }
+
+                    if (descriptorSet != boundDescriptorSet) {
+                        commandList->setGraphicsDescriptorSet(descriptorSet, 0);
+                        boundDescriptorSet = descriptorSet;
                     }
 
                     const RenderRect scissor(left, top, right, bottom);
@@ -325,6 +425,9 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
         // Whatever graphicsAPI says, a page draws through WebGPU (RT64::Application).
         ImGui::GetIO().BackendRendererName = "rt64_plume_webgpu";
         ImGui::GetIO().BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
+#       if defined(IMGUI_HAS_TEXTURES)
+        ImGui::GetIO().BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+#       endif
         webgpuContext = std::make_unique<WebGPUContext>(device);
         return;
 #   endif
@@ -393,6 +496,9 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
 #   if defined(__EMSCRIPTEN__)
         webgpuContext.reset();
         ImGui::GetIO().BackendRendererName = nullptr;
+#       if defined(IMGUI_HAS_TEXTURES)
+        ImGui::GetIO().BackendFlags &= ~ImGuiBackendFlags_RendererHasTextures;
+#       endif
 #   else
         switch (graphicsAPI) {
         case UserConfiguration::GraphicsAPI::D3D12: {
@@ -448,7 +554,10 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
         }
 
 #   if defined(__EMSCRIPTEN__)
+        // From ImGui 1.92 the draw makes and updates the textures (WebGPUContext::updateTexture).
+#       if !defined(IMGUI_HAS_TEXTURES)
         webgpuContext->updateFontTexture();
+#       endif
 #   else
         switch (graphicsAPI) {
         case UserConfiguration::GraphicsAPI::D3D12: {
