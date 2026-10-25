@@ -626,7 +626,14 @@ namespace RT64 {
     }
     
     void State::checkRDRAM() {
-        landRAMCopies(false);
+        // The list before's frames copied to RAM a list late (renderToRAMLate) land here only once the GPU has them, so the
+        // list doesn't wait for the GPU to finish the frame before. One the GPU hasn't finished lands at the next VI that
+        // finds it ready, or at the latest where this list's fullSync() begins, before anything reuses its readback
+        // buffers: on a phone's GPU, kept at its lowest clock while it keeps up, a frame takes longer than the time
+        // between the game's lists, and the wait here was a quarter of each list's time. Until it lands, RDRAM holds what
+        // it held when that list ended, which is what the framebuffer's hash was taken of then (hashTracking()), so the
+        // check below doesn't take it for a change by the CPU.
+        landRAMCopies(true);
 
         if (!rdramCheckPending) {
             return;
@@ -918,6 +925,7 @@ namespace RT64 {
     }
 
     void State::fullSync() {
+        // Whatever the list before copied to RAM late and the GPU hadn't finished when this list started (checkRDRAM()).
         landRAMCopies(false);
         flush();
         submitFramebufferPair(FramebufferPair::FlushReason::ProcessDisplayListsEnd);
@@ -2002,8 +2010,8 @@ namespace RT64 {
     }
     
     void State::updateScreen(const VI &newVI, bool fromEarlyPresent) {
-        // A frame copied to RAM a list late (renderToRAMLate) lands at the first VI after the GPU has finished it, or when
-        // the next list starts if that comes first.
+        // A frame copied to RAM a list late (renderToRAMLate) lands at the first VI or list start after the GPU has
+        // finished it, or where the next list's fullSync() begins if that comes first (checkRDRAM()).
         landRAMCopies(true);
 
         // If the debugger has paused the plugin, keep submitting the last workload and screen VI for rendering and a present event.
