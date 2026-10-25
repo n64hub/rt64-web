@@ -3,6 +3,7 @@
 //
 
 #include <algorithm>
+#include <tuple>
 
 #include "common/rt64_math.h"
 
@@ -577,61 +578,139 @@ namespace RT64 {
         tileCheckSet.clear();
         lookAtCheckSet.clear();
 
-        // Traverse the map and fill the set with all the combinations of transforms to check.
-        for (std::pair<uint64_t, GameCallMap> curIt : curCallHashMap) {
-            auto prevRange = std::equal_range(prevCallHashMap.begin(), prevCallHashMap.end(), std::pair<uint64_t, GameCallMap>{ curIt.first, {} }, byHash);
-            for (auto prevIt = prevRange.first; prevIt != prevRange.second; prevIt++) {
-                const GameIndices::Projection &curProjIndices = curScene.projections[curIt.second.sceneProjIndex];
-                const Workload &curWorkload = workloadQueue.workloads[curProjIndices.workloadIndex];
-                const FramebufferPair &curFbPair = curWorkload.fbPairs[curProjIndices.fbPairIndex];
-                const Projection &curProj = curFbPair.projections[curProjIndices.projectionIndex];
-                const GameCall &curCall = curProj.gameCalls[curIt.second.callIndex];
-                const GameIndices::Projection &prevProjIndices = prevScene.projections[prevIt->second.sceneProjIndex];
-                const Workload &prevWorkload = workloadQueue.workloads[prevProjIndices.workloadIndex];
-                const FramebufferPair &prevFbPair = prevWorkload.fbPairs[prevProjIndices.fbPairIndex];
-                const Projection &prevProj = prevFbPair.projections[prevProjIndices.projectionIndex];
-                const GameCall &prevCall = prevProj.gameCalls[prevIt->second.callIndex];
-                const uint32_t curWorldMatrixCount = (curCall.callDesc.maxWorldMatrix - curCall.callDesc.minWorldMatrix) + 1;
-                const uint32_t prevWorldMatrixCount = (prevCall.callDesc.maxWorldMatrix - prevCall.callDesc.minWorldMatrix) + 1;
-                if ((curWorldMatrixCount == prevWorldMatrixCount) && curIt.second.doTransformMatching && prevIt->second.doTransformMatching) {
-                    for (uint32_t w = 0; w < curWorldMatrixCount; w++) {
-                        const uint32_t curWorldMatrix = curCall.callDesc.minWorldMatrix + w;
-                        const uint32_t curGroupIndex = curWorkload.drawData.worldTransformGroups[curWorldMatrix];
-                        const TransformGroup &curGroup = curWorkload.drawData.transformGroups[curGroupIndex];
-                        const uint32_t prevWorldMatrix = prevCall.callDesc.minWorldMatrix + w;
-                        const uint32_t prevGroupIndex = prevWorkload.drawData.worldTransformGroups[prevWorldMatrix];
-                        const TransformGroup &prevGroup = prevWorkload.drawData.transformGroups[prevGroupIndex];
-                        if ((curGroup.matrixId == prevGroup.matrixId) && ((curGroup.matrixId == G_EX_ID_AUTO) || ((curGroup.matrixId != G_EX_ID_IGNORE) && (curGroup.ordering == G_EX_ORDER_AUTO)))) {
-                            transformCheckSet.emplace_back(curWorldMatrix, prevWorldMatrix);
-                        }
-                    }
+        // Fill the sets with every combination of transforms, tiles and look ats the calls of a hash could match with the
+        // previous frame's calls of the same hash, a hash's calls at a time. A pair of calls adds the pairs of their
+        // matrices (from their workloads, at the same place in each call's range), of their tiles and of their look
+        // ats, so it adds only what each call's own are: calls with the same range of matrices add the same transform
+        // pairs, and those with no tiles to interpolate or no texture generation add none of those. A group of many
+        // alike calls cost its square: Banjo-Tooie's levels drew up to 398 calls of one hash, a frame of 1,000 calls
+        // made 167,000 pairs of calls for 200-1,800 pairs of transforms, and the matching took 18-23 ms of each game
+        // frame on a phone, 13 ms of it making the pairs. So each side's distinct ranges are paired, and only the calls
+        // that can add a tile or look at pair are, each call's lookups made once. The sets are sorted and their repeats
+        // dropped after, so they hold what pairing every two calls put in them.
+        struct CallMatrices {
+            uint32_t workloadIndex;
+            uint32_t minWorldMatrix;
+            uint32_t maxWorldMatrix;
+
+            bool operator<(const CallMatrices &o) const {
+                return std::tie(workloadIndex, minWorldMatrix, maxWorldMatrix) < std::tie(o.workloadIndex, o.minWorldMatrix, o.maxWorldMatrix);
+            }
+
+            bool operator==(const CallMatrices &o) const {
+                return (workloadIndex == o.workloadIndex) && (minWorldMatrix == o.minWorldMatrix) && (maxWorldMatrix == o.maxWorldMatrix);
+            }
+        };
+
+        struct CallTiles {
+            const Workload *workload;
+            uint32_t tileIndex;
+            uint32_t tileCount;
+            bool doTileMatching;
+        };
+
+        using CallHashIterator = std::vector<std::pair<uint64_t, GameCallMap>>::const_iterator;
+        thread_local std::vector<CallMatrices> curMatrices;
+        thread_local std::vector<CallMatrices> prevMatrices;
+        thread_local std::vector<CallTiles> curTiles;
+        thread_local std::vector<CallTiles> prevTiles;
+        thread_local std::vector<uint32_t> curLookAts;
+        thread_local std::vector<uint32_t> prevLookAts;
+        auto collectCalls = [&](const GameScene &scene, CallHashIterator begin, CallHashIterator end, std::vector<CallMatrices> &matrices,
+            std::vector<CallTiles> &tiles, std::vector<uint32_t> &lookAts)
+        {
+            matrices.clear();
+            tiles.clear();
+            lookAts.clear();
+            for (CallHashIterator it = begin; it != end; it++) {
+                const GameCallMap &callMap = it->second;
+                const GameIndices::Projection &projIndices = scene.projections[callMap.sceneProjIndex];
+                const Workload &workload = workloadQueue.workloads[projIndices.workloadIndex];
+                const FramebufferPair &fbPair = workload.fbPairs[projIndices.fbPairIndex];
+                const Projection &proj = fbPair.projections[projIndices.projectionIndex];
+                const GameCall &call = proj.gameCalls[callMap.callIndex];
+                if (callMap.doTransformMatching) {
+                    matrices.push_back({ projIndices.workloadIndex, call.callDesc.minWorldMatrix, call.callDesc.maxWorldMatrix });
                 }
 
-                if ((curCall.callDesc.tileCount == prevCall.callDesc.tileCount) && (curIt.second.doTileInterpolation && prevIt->second.doTileInterpolation)) {
-                    for (uint32_t t = 0; t < curCall.callDesc.tileCount; t++) {
-                        const DrawCallTile &curCallTile = curWorkload.drawData.callTiles[curCall.callDesc.tileIndex + t];
-                        const DrawCallTile &prevCallTile = prevWorkload.drawData.callTiles[prevCall.callDesc.tileIndex + t];
-                        bool doTileMatching = curIt.second.doTileMatching && prevIt->second.doTileMatching;
-                        if (doTileMatching && (curCallTile.tmemHashOrID != prevCallTile.tmemHashOrID)) {
+                if (callMap.doTileInterpolation && (call.callDesc.tileCount > 0)) {
+                    tiles.push_back({ &workload, call.callDesc.tileIndex, call.callDesc.tileCount, bool(callMap.doTileMatching) });
+                }
+
+                // FIXME: We assume the same look at is used throughout the entire draw call, so we only check the first vertex.
+                const uint32_t textureGenMask = G_LIGHTING | G_TEXTURE_GEN;
+                if ((call.callDesc.geometryMode & textureGenMask) == textureGenMask) {
+                    const uint32_t vertexIndex = workload.drawData.faceIndices[call.meshDesc.faceIndicesStart];
+                    lookAts.push_back(workload.drawData.lookAtIndices[vertexIndex] >> RSP_LOOKAT_INDEX_SHIFT);
+                }
+            }
+
+            std::sort(matrices.begin(), matrices.end());
+            matrices.erase(std::unique(matrices.begin(), matrices.end()), matrices.end());
+            std::sort(lookAts.begin(), lookAts.end());
+            lookAts.erase(std::unique(lookAts.begin(), lookAts.end()), lookAts.end());
+        };
+
+        for (CallHashIterator curBegin = curCallHashMap.cbegin(); curBegin != curCallHashMap.cend();) {
+            CallHashIterator curEnd = curBegin;
+            while ((curEnd != curCallHashMap.cend()) && (curEnd->first == curBegin->first)) {
+                curEnd++;
+            }
+
+            auto prevRange = std::equal_range(prevCallHashMap.cbegin(), prevCallHashMap.cend(), *curBegin, byHash);
+            if (prevRange.first != prevRange.second) {
+                collectCalls(curScene, curBegin, curEnd, curMatrices, curTiles, curLookAts);
+                collectCalls(prevScene, prevRange.first, prevRange.second, prevMatrices, prevTiles, prevLookAts);
+                for (const CallMatrices &cur : curMatrices) {
+                    const Workload &curWorkload = workloadQueue.workloads[cur.workloadIndex];
+                    for (const CallMatrices &prev : prevMatrices) {
+                        if ((cur.maxWorldMatrix - cur.minWorldMatrix) != (prev.maxWorldMatrix - prev.minWorldMatrix)) {
                             continue;
                         }
 
-                        tileCheckSet.emplace_back(curCall.callDesc.tileIndex + t, prevCall.callDesc.tileIndex + t);
+                        const Workload &prevWorkload = workloadQueue.workloads[prev.workloadIndex];
+                        const uint32_t worldMatrixCount = (cur.maxWorldMatrix - cur.minWorldMatrix) + 1;
+                        for (uint32_t w = 0; w < worldMatrixCount; w++) {
+                            const uint32_t curWorldMatrix = cur.minWorldMatrix + w;
+                            const uint32_t curGroupIndex = curWorkload.drawData.worldTransformGroups[curWorldMatrix];
+                            const TransformGroup &curGroup = curWorkload.drawData.transformGroups[curGroupIndex];
+                            const uint32_t prevWorldMatrix = prev.minWorldMatrix + w;
+                            const uint32_t prevGroupIndex = prevWorkload.drawData.worldTransformGroups[prevWorldMatrix];
+                            const TransformGroup &prevGroup = prevWorkload.drawData.transformGroups[prevGroupIndex];
+                            if ((curGroup.matrixId == prevGroup.matrixId) && ((curGroup.matrixId == G_EX_ID_AUTO) || ((curGroup.matrixId != G_EX_ID_IGNORE) && (curGroup.ordering == G_EX_ORDER_AUTO)))) {
+                                transformCheckSet.emplace_back(curWorldMatrix, prevWorldMatrix);
+                            }
+                        }
                     }
                 }
 
-                const uint32_t textureGenMask = G_LIGHTING | G_TEXTURE_GEN;
-                const bool curUsesTextureGen = (curCall.callDesc.geometryMode & textureGenMask) == textureGenMask;
-                const bool prevUsesTextureGen = (prevCall.callDesc.geometryMode & textureGenMask) == textureGenMask;
-                if (curUsesTextureGen && prevUsesTextureGen && (true && true)) { // TODO: Do look at matching condition.
-                    // FIXME: We assume the same look at is used throughout the entire draw call, so we only check the first vertex.
-                    const uint32_t curVertexIndex = curWorkload.drawData.faceIndices[curCall.meshDesc.faceIndicesStart];
-                    const uint32_t prevVertexIndex = prevWorkload.drawData.faceIndices[prevCall.meshDesc.faceIndicesStart];
-                    const uint32_t curLookAtIndex = curWorkload.drawData.lookAtIndices[curVertexIndex] >> RSP_LOOKAT_INDEX_SHIFT;
-                    const uint32_t prevLookAtIndex = prevWorkload.drawData.lookAtIndices[prevVertexIndex] >> RSP_LOOKAT_INDEX_SHIFT;
-                    lookAtCheckSet.emplace_back(curLookAtIndex, prevLookAtIndex);
+                for (const CallTiles &cur : curTiles) {
+                    for (const CallTiles &prev : prevTiles) {
+                        if (cur.tileCount != prev.tileCount) {
+                            continue;
+                        }
+
+                        const bool doTileMatching = cur.doTileMatching && prev.doTileMatching;
+                        for (uint32_t t = 0; t < cur.tileCount; t++) {
+                            const DrawCallTile &curCallTile = cur.workload->drawData.callTiles[cur.tileIndex + t];
+                            const DrawCallTile &prevCallTile = prev.workload->drawData.callTiles[prev.tileIndex + t];
+                            if (doTileMatching && (curCallTile.tmemHashOrID != prevCallTile.tmemHashOrID)) {
+                                continue;
+                            }
+
+                            tileCheckSet.emplace_back(cur.tileIndex + t, prev.tileIndex + t);
+                        }
+                    }
+                }
+
+                for (uint32_t curLookAt : curLookAts) {
+                    for (uint32_t prevLookAt : prevLookAts) {
+                        lookAtCheckSet.emplace_back(curLookAt, prevLookAt);
+                    }
                 }
             }
+
+            curBegin = curEnd;
         }
 
         // Sorted and without repeats, as the sets were.
