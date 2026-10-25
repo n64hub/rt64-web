@@ -925,7 +925,6 @@ namespace RT64 {
     }
 
     void State::fullSync() {
-        // Whatever the list before copied to RAM late and the GPU hadn't finished when this list started (checkRDRAM()).
         landRAMCopies(false);
         flush();
         submitFramebufferPair(FramebufferPair::FlushReason::ProcessDisplayListsEnd);
