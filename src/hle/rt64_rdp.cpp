@@ -1191,6 +1191,9 @@ namespace RT64 {
         uly += extAlignment.topOffset;
         lrx += extAlignment.rightOffset;
         lry += extAlignment.bottomOffset;
+#   if defined(__EMSCRIPTEN__)
+        const int32_t gameLry = lry;
+#   endif
 
         // There's a very common error in many games where rectangles are incorrectly configured with one
         // less pixel than what's required to fill out the screen because other rectangle methods under
@@ -1199,9 +1202,6 @@ namespace RT64 {
         // tolerance of one pixel from the scissor coordinates.
         const FixedRect &scissorRect = state->rdp->scissorRectStack[scissorStackSize - 1];
         const bool fixRectLR = state->ext.enhancementConfig->rect.fixRectLR;
-#   if defined(__EMSCRIPTEN__)
-        const int32_t gameLry = lry;
-#   endif
         if (!scissorRect.isNull() && fixRectLR) {
             if ((abs(scissorRect.lrx - lrx) <= 4) && (ulx < scissorRect.lrx)) {
                 lrx = scissorRect.lrx;
