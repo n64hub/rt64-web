@@ -8,7 +8,8 @@
 
 #if defined(__EMSCRIPTEN__)
 namespace RT64 {
-    // A page has no file dialogs of its own: every one is cancelled.
+    // A page has no file dialogs of its own: every one is cancelled, its callback given an empty path at once, as a
+    // cancelled dialog's is.
 
     std::atomic<bool> FileDialog::isOpen = false;
 
@@ -16,20 +17,24 @@ namespace RT64 {
 
     void FileDialog::finish() { }
 
-    std::filesystem::path FileDialog::getDirectoryPath() {
-        return std::filesystem::path();
+    void FileDialog::getDirectoryPath(const Callback &callback) {
+        callback(std::filesystem::path());
     }
 
-    std::filesystem::path FileDialog::getOpenFilename(const std::vector<FileFilter> &) {
-        return std::filesystem::path();
+    void FileDialog::getOpenFilename(const std::vector<FileFilter> &, const Callback &callback) {
+        callback(std::filesystem::path());
     }
 
-    std::filesystem::path FileDialog::getSaveFilename(const std::vector<FileFilter> &) {
-        return std::filesystem::path();
+    void FileDialog::getSaveFilename(const std::vector<FileFilter> &, const Callback &callback) {
+        callback(std::filesystem::path());
     }
 };
 #else
 #include <nfd.h>
+
+#if defined(__APPLE__)
+#   include "apple/rt64_apple.h"
+#endif
 
 namespace RT64 {
     // FileDialog
@@ -53,9 +58,11 @@ namespace RT64 {
         return nfdFilters;
     }
 
-    std::filesystem::path FileDialog::getDirectoryPath() {
+    void FileDialog::getDirectoryPath(const Callback &callback) {
         isOpen = true;
-
+#ifdef __APPLE__
+        apple::dispatchOnMainThread([callback]() {
+#endif
         std::filesystem::path path;
         nfdnchar_t *nfdPath = nullptr;
         nfdresult_t res = NFD_PickFolderN(&nfdPath, nullptr);
@@ -64,13 +71,19 @@ namespace RT64 {
             NFD_FreePathN(nfdPath);
         }
 
+        callback(path);
+#ifdef __APPLE__
+        });
+#endif
         isOpen = false;
-        return path;
+
     }
 
-    std::filesystem::path FileDialog::getOpenFilename(const std::vector<FileFilter> &filters) {
+    void FileDialog::getOpenFilename(const std::vector<FileFilter> &filters, const Callback &callback) {
         isOpen = true;
-        
+#ifdef __APPLE__
+        apple::dispatchOnMainThread([filters, callback]() {
+#endif
         std::filesystem::path path;
         nfdnchar_t *nfdPath = nullptr;
         std::vector<nfdnfilteritem_t> nfdFilters = convertFilters(filters);
@@ -80,13 +93,19 @@ namespace RT64 {
             NFD_FreePathN(nfdPath);
         }
 
+        callback(path);
+#ifdef __APPLE__
+        });
+#endif
         isOpen = false;
-        return path;
+
     }
 
-    std::filesystem::path FileDialog::getSaveFilename(const std::vector<FileFilter> &filters) {
+    void FileDialog::getSaveFilename(const std::vector<FileFilter> &filters, const Callback &callback) {
         isOpen = true;
-
+#ifdef __APPLE__
+        apple::dispatchOnMainThread([filters, callback]() {
+#endif
         std::filesystem::path path;
         nfdnchar_t *nfdPath = nullptr;
         std::vector<nfdnfilteritem_t> nfdFilters = convertFilters(filters);
@@ -96,8 +115,12 @@ namespace RT64 {
             NFD_FreePathN(nfdPath);
         }
 
+        callback(path);
+#ifdef __APPLE__
+        });
+#endif
         isOpen = false;
-        return path;
+
     }
 };
 #endif

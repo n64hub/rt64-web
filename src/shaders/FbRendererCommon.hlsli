@@ -68,10 +68,10 @@ SamplerState gTileSampler5 : register(s13, space1);
 SamplerState gTileSampler6 : register(s14, space1);
 SamplerState gTileSampler7 : register(s15, space1);
 
-// Set 2 - The TMEM of every texture cache entry, RDP_TMEM_BYTES at RDP_TMEM_BYTES * its index.
+// Set 2 - The TMEM of every texture cache entry, TMEM_RDP_BYTES at TMEM_RDP_BYTES * its index.
 ByteAddressBuffer gTMEMPool : register(t0, space2);
 
-// What TextureDecoder.hlsli reads TMEM from: the entry's offset in the pool.
+// What shared/rt64_texture_decoder.h reads TMEM from: the entry's offset in the pool.
 #define TMEM_SOURCE uint
 #define TMEM_LOAD(TMEM, address) ((gTMEMPool.Load((TMEM) + ((address) & ~3U)) >> (((address) & 3U) * 8U)) & 0xFFU)
 #else

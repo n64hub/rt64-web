@@ -31,6 +31,7 @@ namespace RT64 {
             SharedQueueResources *sharedResources = nullptr;
             const ShaderLibrary *shaderLibrary = nullptr;
             UserConfiguration::GraphicsAPI createdGraphicsAPI = UserConfiguration::GraphicsAPI::OptionCount;
+            bool swapChainPresentWaitEnabled = false;
         };
 
         External ext;
@@ -60,7 +61,6 @@ namespace RT64 {
         ProfilingTimer presentProfiler = ProfilingTimer(120);
         Timestamp presentTimestamp;
         VIHistory viHistory;
-        bool presentWaitEnabled = false;
         uint32_t pacingMultiple = 0;
         std::deque<std::pair<Timestamp, bool>> pacingPresents;
         uint32_t pacingDropped = 0;

@@ -67,6 +67,7 @@ namespace RT64 {
 
         rsp = std::make_unique<RSP>(this);
         rdp = std::make_unique<RDP>(this);
+        dialogResults = std::make_shared<FileDialogResults>();
 
         reset();
     }
@@ -120,6 +121,7 @@ namespace RT64 {
         drawCall.scissorMode = 0;
         drawCall.scissorLeftOrigin = G_EX_ORIGIN_NONE;
         drawCall.scissorRightOrigin = G_EX_ORIGIN_NONE;
+        drawCall.scissorAspect = G_EX_ASPECT_AUTO;
         drawCall.colorCombiner = { 0, 0 };
         drawCall.otherMode = { 0, 0 };
         drawCall.geometryMode = 0;
@@ -2397,7 +2399,8 @@ namespace RT64 {
                     
                     genConfigChanged = ImGui::InputInt("Downsample Multiplier", &userConfig.downsampleMultiplier) || genConfigChanged;
                     
-                    ImGui::BeginDisabled(!ext.device->getCapabilities().sampleLocations);
+                    const RenderDeviceCapabilities &capabilities = ext.device->getCapabilities();
+                    ImGui::BeginDisabled(!capabilities.sampleLocations);
                     const bool usesHDR = ext.shaderLibrary->usesHDR;
                     const RenderSampleCounts sampleCountsSupported = ext.device->getSampleCountsSupported(RenderTarget::colorBufferFormat(usesHDR)) & ext.device->getSampleCountsSupported(RenderTarget::depthBufferFormat());
                     const uint32_t antialiasingOptionCount = uint32_t(UserConfiguration::Antialiasing::OptionCount);
@@ -2447,8 +2450,13 @@ namespace RT64 {
 
                     // Store the user configuration that was used during initialization the first time we check this.
                     static UserConfiguration::InternalColorFormat configColorFormat = UserConfiguration::InternalColorFormat::OptionCount;
+                    static UserConfiguration::PresentWait configPresentWait = UserConfiguration::PresentWait::OptionCount;
                     if (configColorFormat == UserConfiguration::InternalColorFormat::OptionCount) {
                         configColorFormat = userConfig.internalColorFormat;
+                    }
+
+                    if (configPresentWait == UserConfiguration::PresentWait::OptionCount) {
+                        configPresentWait = userConfig.presentWait;
                     }
 
                     genConfigChanged = ImGui::Combo("Color Format", reinterpret_cast<int *>(&userConfig.internalColorFormat), "Standard\0High\0Automatic\0") || genConfigChanged;
@@ -2461,6 +2469,19 @@ namespace RT64 {
                         ext.shaderLibrary->usesHardwareResolve = (userConfig.hardwareResolve != UserConfiguration::HardwareResolve::Disabled);
                         genConfigChanged = true;
                     }
+
+#               if defined(__EMSCRIPTEN__)
+                    // A page always waits (Application::setup()).
+                    ImGui::BeginDisabled(true);
+#               else
+                    ImGui::BeginDisabled(!capabilities.presentWait);
+#               endif
+                    genConfigChanged = ImGui::Combo("Present Wait", reinterpret_cast<int *>(&userConfig.presentWait), "Disabled\0Enabled\0Automatic\0") || genConfigChanged;
+                    if (userConfig.presentWait != configPresentWait) {
+                        ImGui::Text("You must restart the application for this change to be applied.");
+                    }
+
+                    ImGui::EndDisabled();
 
                     genConfigChanged = ImGui::Checkbox("Three-Point Filtering", &userConfig.threePointFiltering) || genConfigChanged;
                     genConfigChanged = ImGui::Checkbox("High Performance State", &userConfig.idleWorkActive) || genConfigChanged;
@@ -2517,6 +2538,7 @@ namespace RT64 {
                 }
 
                 if (ImGui::BeginTabItem("Textures")) {
+                    std::lock_guard lock(dialogResults->mutex);
                     for (const ReplacementDirectory &replacementDirectory : ext.textureCache->textureMap.replacementMap.replacementDirectories) {
                         const std::string replacementPath = replacementDirectory.dirOrZipPath.u8string();
                         ImGui::Text("Texture replacement path: %s", replacementPath.c_str());
@@ -2552,36 +2574,52 @@ namespace RT64 {
                     ImGui::BeginChild("##textureReplacements", ImVec2(0, -64));
                     ImGui::EndChild();
 
-                    const bool loadPack = ImGui::Button("Load pack");
+                    if (ImGui::Button("Load pack")) {
+                        FileDialog::getOpenFilename({ FileFilter("RTZ Files", "rtz") }, [=](const std::filesystem::path &path) {
+                            std::lock_guard lock(dialogResults->mutex);
+                            dialogResults->loadPackPath = path;
+                        });
+                    }
+
                     ImGui::SameLine();
-                    const bool loadDirectory = ImGui::Button("Load directory");
+                    if (ImGui::Button("Load directory")) {
+                        FileDialog::getDirectoryPath([=](const std::filesystem::path &path) {
+                            std::lock_guard lock(dialogResults->mutex);
+                            dialogResults->loadDirectoryPath = path;
+                        });
+                    }
+
                     ImGui::SameLine();
                     const bool saveDirectory = ImGui::Button("Save directory");
+
                     ImGui::SameLine();
-                    const bool dumpTextures = ImGui::Button(dumpingTexturesDirectory.empty() ? "Start dumping textures" : "Stop dumping textures");
-                    if (loadPack) {
-                        std::filesystem::path newPack = FileDialog::getOpenFilename({ FileFilter("RTZ Files", "rtz") });
-                        if (!newPack.empty()) {
-                            ext.textureCache->loadReplacementDirectory(ReplacementDirectory(newPack));
-                        }
-                    }
-                    else if (loadDirectory) {
-                        std::filesystem::path newDirectory = FileDialog::getDirectoryPath();
-                        if (!newDirectory.empty()) {
-                            ext.textureCache->loadReplacementDirectory(ReplacementDirectory(newDirectory));
-                        }
-                    }
-                    else if (saveDirectory) {
-                        ext.textureCache->saveReplacementDatabase();
-                    }
-                    else if (dumpTextures) {
+                    if (ImGui::Button(dumpingTexturesDirectory.empty() ? "Start dumping textures" : "Stop dumping textures")) {
                         if (dumpingTexturesDirectory.empty()) {
-                            dumpingTexturesDirectory = FileDialog::getDirectoryPath();
-                            textureManager.dumpedSet.clear();
+                            FileDialog::getDirectoryPath([=](const std::filesystem::path &path) {
+                                std::lock_guard lock(dialogResults->mutex);
+                                dialogResults->nextDumpingTexturesDirectory = path;
+                            });
                         }
                         else {
                             dumpingTexturesDirectory.clear();
                         }
+                    }
+
+                    if (!dialogResults->loadPackPath.empty()) {
+                        ext.textureCache->loadReplacementDirectory(ReplacementDirectory(dialogResults->loadPackPath));
+                        dialogResults->loadPackPath.clear();
+                    }
+                    else if (!dialogResults->loadDirectoryPath.empty()) {
+                        ext.textureCache->loadReplacementDirectory(ReplacementDirectory(dialogResults->loadDirectoryPath));
+                        dialogResults->loadDirectoryPath.clear();
+                    }
+                    else if (saveDirectory) {
+                        ext.textureCache->saveReplacementDatabase();
+                    }
+                    else if (!dialogResults->nextDumpingTexturesDirectory.empty()) {
+                        dumpingTexturesDirectory = dialogResults->nextDumpingTexturesDirectory;
+                        dialogResults->nextDumpingTexturesDirectory.clear();
+                        textureManager.dumpedSet.clear();
                     }
 
                     if (ext.textureCache->textureMap.replacementMap.fileSystemIsDirectory) {
@@ -2600,39 +2638,43 @@ namespace RT64 {
                         }
                     }
 
-                    const bool loadPacks = ImGui::Button("Load packs");
-                    ImGui::SameLine();
-                    const bool loadDirectories = ImGui::Button("Load directories");
-                    ImGui::SameLine();
-                    if (loadPacks) {
-                        // Ask for packs until the user cancels it.
-                        std::vector<ReplacementDirectory> replacementDirectories;
-                        std::filesystem::path newPack;
-                        do {
-                            newPack = FileDialog::getOpenFilename({ FileFilter("RTZ Files", "rtz") });
-                            if (!newPack.empty()) {
-                                replacementDirectories.emplace_back(ReplacementDirectory(newPack));
-                            }
-                        } while (!newPack.empty());
-
-                        if (!replacementDirectories.empty()) {
-                            ext.textureCache->loadReplacementDirectories(replacementDirectories);
-                        }
+                    if (ImGui::Button("Load packs")) {
+                        dialogResults->multiLoadPackInProgress = true;
                     }
-                    else if (loadDirectories) {
-                        // Ask for directories until the user cancels it.
-                        std::vector<ReplacementDirectory> replacementDirectories;
-                        std::filesystem::path newDirectory;
-                        do {
-                            newDirectory = FileDialog::getDirectoryPath();
-                            if (!newDirectory.empty()) {
-                                replacementDirectories.emplace_back(ReplacementDirectory(newDirectory));
-                            }
-                        } while (!newDirectory.empty());
 
-                        if (!replacementDirectories.empty()) {
-                            ext.textureCache->loadReplacementDirectories(replacementDirectories);
-                        }
+                    ImGui::SameLine();
+
+                    if (ImGui::Button("Load directories")) {
+                        dialogResults->multiLoadDirectoryInProgress = true;
+                    }
+
+                    ImGui::SameLine();
+
+                    if (dialogResults->multiLoadPackInProgress) {
+                        FileDialog::getOpenFilename({ FileFilter("RTZ Files", "rtz") }, [=](const std::filesystem::path &path) {
+                            std::lock_guard lock(dialogResults->mutex);
+                            if (path.empty()) {
+                                dialogResults->multiLoadPackInProgress = false;
+                            }
+                            else {
+                                dialogResults->multiLoadReplacementPaths.emplace_back(path);
+                            }
+                        });
+                    }
+                    else if (dialogResults->multiLoadDirectoryInProgress) {
+                        FileDialog::getDirectoryPath([=](const std::filesystem::path &path) {
+                            std::lock_guard lock(dialogResults->mutex);
+                            if (path.empty()) {
+                                dialogResults->multiLoadDirectoryInProgress = false;
+                            }
+                            else {
+                                dialogResults->multiLoadReplacementPaths.emplace_back(path);
+                            }
+                        });
+                    }
+                    else if (!dialogResults->multiLoadReplacementPaths.empty()) {
+                        ext.textureCache->loadReplacementDirectories(dialogResults->multiLoadReplacementPaths);
+                        dialogResults->multiLoadReplacementPaths.clear();
                     }
 
                     ImGui::EndTabItem();
@@ -2718,17 +2760,17 @@ namespace RT64 {
                         const auto &screenApiProfiler = *ext.screenApiProfiler;
                         ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, FrametimeLimit);
                         ImPlot::SetupAxis(ImAxis_Y1, "ms", ImPlotAxisFlags_AutoFit);
-                        ImPlot::PlotLine<double>("Present", presentProfiler.data(), static_cast<int>(presentProfiler.size()), 1.0, 0.0, ImPlotLineFlags_None, presentProfiler.index(), Stride);
-                        ImPlot::PlotLine<double>("Renderer (CPU)", rendererCPUProfiler.data(), static_cast<int>(rendererCPUProfiler.size()), 1.0, 0.0, ImPlotLineFlags_None, rendererCPUProfiler.index(), Stride);
-                        ImPlot::PlotLine<double>("Renderer (GPU)", rendererGPUProfiler.data(), static_cast<int>(rendererGPUProfiler.size()), 1.0, 0.0, ImPlotLineFlags_None, rendererGPUProfiler.index(), Stride);
-                        ImPlot::PlotLine<double>("Matching", matchingProfiler.data(), static_cast<int>(matchingProfiler.size()), 1.0, 0.0, ImPlotLineFlags_None, matchingProfiler.index(), Stride);
-                        ImPlot::PlotLine<double>("Workload", workloadProfiler.data(), static_cast<int>(workloadProfiler.size()), 1.0, 0.0, ImPlotLineFlags_None, workloadProfiler.index(), Stride);
-                        ImPlot::PlotLine<double>("Display List (API)", dlApiProfiler.data(), static_cast<int>(dlApiProfiler.size()), 1.0, 0.0, ImPlotLineFlags_None, dlApiProfiler.index(), Stride);
-                        ImPlot::PlotLine<double>("Display List (CPU)", dlCpuProfiler.data(), static_cast<int>(dlCpuProfiler.size()), 1.0, 0.0, ImPlotLineFlags_None, dlCpuProfiler.index(), Stride);
+                        ImPlot::PlotLine<double>("Present", presentProfiler.data(), static_cast<int>(presentProfiler.size()), 1.0, 0.0, ImPlotSpec(ImPlotProp_Offset, presentProfiler.index(), ImPlotProp_Stride, Stride));
+                        ImPlot::PlotLine<double>("Renderer (CPU)", rendererCPUProfiler.data(), static_cast<int>(rendererCPUProfiler.size()), 1.0, 0.0, ImPlotSpec(ImPlotProp_Offset, rendererCPUProfiler.index(), ImPlotProp_Stride, Stride));
+                        ImPlot::PlotLine<double>("Renderer (GPU)", rendererGPUProfiler.data(), static_cast<int>(rendererGPUProfiler.size()), 1.0, 0.0, ImPlotSpec(ImPlotProp_Offset, rendererGPUProfiler.index(), ImPlotProp_Stride, Stride));
+                        ImPlot::PlotLine<double>("Matching", matchingProfiler.data(), static_cast<int>(matchingProfiler.size()), 1.0, 0.0, ImPlotSpec(ImPlotProp_Offset, matchingProfiler.index(), ImPlotProp_Stride, Stride));
+                        ImPlot::PlotLine<double>("Workload", workloadProfiler.data(), static_cast<int>(workloadProfiler.size()), 1.0, 0.0, ImPlotSpec(ImPlotProp_Offset, workloadProfiler.index(), ImPlotProp_Stride, Stride));
+                        ImPlot::PlotLine<double>("Display List (API)", dlApiProfiler.data(), static_cast<int>(dlApiProfiler.size()), 1.0, 0.0, ImPlotSpec(ImPlotProp_Offset, dlApiProfiler.index(), ImPlotProp_Stride, Stride));
+                        ImPlot::PlotLine<double>("Display List (CPU)", dlCpuProfiler.data(), static_cast<int>(dlCpuProfiler.size()), 1.0, 0.0, ImPlotSpec(ImPlotProp_Offset, dlCpuProfiler.index(), ImPlotProp_Stride, Stride));
                         ImPlot::HideNextItem();
-                        ImPlot::PlotLine<double>("Update Screen (API)", screenApiProfiler.data(), static_cast<int>(screenApiProfiler.size()), 1.0, 0.0, ImPlotLineFlags_None, screenApiProfiler.index(), Stride);
-                        ImPlot::PlotLine<double>("Update Screen (VI Changed)", viChangedProfiler.data(), static_cast<int>(viChangedProfiler.size()), 1.0, 0.0, ImPlotLineFlags_None, viChangedProfiler.index(), Stride);
-                        ImPlot::PlotLine<double>("Update Screen (CPU)", screenCpuProfiler.data(), static_cast<int>(screenCpuProfiler.size()), 1.0, 0.0, ImPlotLineFlags_None, screenCpuProfiler.index(), Stride);
+                        ImPlot::PlotLine<double>("Update Screen (API)", screenApiProfiler.data(), static_cast<int>(screenApiProfiler.size()), 1.0, 0.0, ImPlotSpec(ImPlotProp_Offset, screenApiProfiler.index(), ImPlotProp_Stride, Stride));
+                        ImPlot::PlotLine<double>("Update Screen (VI Changed)", viChangedProfiler.data(), static_cast<int>(viChangedProfiler.size()), 1.0, 0.0, ImPlotSpec(ImPlotProp_Offset, viChangedProfiler.index(), ImPlotProp_Stride, Stride));
+                        ImPlot::PlotLine<double>("Update Screen (CPU)", screenCpuProfiler.data(), static_cast<int>(screenCpuProfiler.size()), 1.0, 0.0, ImPlotSpec(ImPlotProp_Offset, screenCpuProfiler.index(), ImPlotProp_Stride, Stride));
                         ImPlot::EndPlot();
                         
                         const double averagePresent = presentProfiler.average();

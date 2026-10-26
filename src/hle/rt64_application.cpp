@@ -254,16 +254,25 @@ namespace RT64 {
         else if (deviceDescription.vendor == RenderDeviceVendor::AMD) {
             if (chosenGraphicsAPI == UserConfiguration::GraphicsAPI::D3D12) {
                 const uint64_t BrokenAMDDriverD3D12 = 0x1800142B080004; // Jan 2019
-                if (deviceDescription.driverVersion <= BrokenAMDDriverD3D12) {
+                const uint64_t BrokenRDNA4DriverD3D12 = 0x200000794103EC; // Aug 2026
+                const bool isRX90 = deviceDescription.name.find("AMD Radeon RX 90") != std::string::npos;
+                const bool isRDNA4 = isRX90;
+                if ((deviceDescription.driverVersion <= BrokenAMDDriverD3D12) || (isRDNA4 && (deviceDescription.driverVersion <= BrokenRDNA4DriverD3D12))) {
                     forceVulkanForCompatibility = true;
                 }
                 else if (automaticGraphicsAPI) {
-                    // Wireframe artifacts have been reported when using a high-precision color format on RDNA3 GPUs in D3D12. The workaround is to switch to Vulkan if this is the case.
-                    bool isRX7 = deviceDescription.name.find("AMD Radeon RX 7") != std::string::npos;
-                    bool isTheCoolerRX7 = deviceDescription.name.find("AMD Radeon(TM) RX 7") != std::string::npos;
-                    bool isRDNA3 = isRX7 || isTheCoolerRX7;
-                    bool useHDRinD3D12 = (userConfig.internalColorFormat == UserConfiguration::InternalColorFormat::Automatic) && device->getCapabilities().preferHDR;
-                    forceVulkanForCompatibility = isRDNA3 && useHDRinD3D12;
+                    if (isRDNA4) {
+                        // We don't know yet what driver will fix the issue for RDNA4, so if it's newer than BrokenRDNA4DriverD3D12, we only force Vulkan if it's in Automatic mode.
+                        forceVulkanForCompatibility = true;
+                    }
+                    else {
+                        // Wireframe artifacts have been reported when using a high-precision color format on RDNA3 GPUs in D3D12. The workaround is to switch to Vulkan if this is the case.
+                        const bool isRX7 = deviceDescription.name.find("AMD Radeon RX 7") != std::string::npos;
+                        const bool isTheCoolerRX7 = deviceDescription.name.find("AMD Radeon(TM) RX 7") != std::string::npos;
+                        const bool isRDNA3 = isRX7 || isTheCoolerRX7;
+                        const bool useHDRinD3D12 = (userConfig.internalColorFormat == UserConfiguration::InternalColorFormat::Automatic) && device->getCapabilities().preferHDR;
+                        forceVulkanForCompatibility = isRDNA3 && useHDRinD3D12;
+                    }
                 }
             }
         }
@@ -354,16 +363,48 @@ namespace RT64 {
         swapChainDesc.format = device->getCapabilities().preferredSwapChainFormat;
         swapChainDesc.textureCount = (userConfig.displayBuffering == UserConfiguration::DisplayBuffering::Triple) ? 3 : 2;
 
-        // Enable present wait if supported by the device. We specify a max latency of 1 as we use it to wait right before the next
-        // presentation call is issued.
-        // 
-        // FIXME: RT64 used to have an error where the swap chain's wait() function would wait for one extra frame under Vulkan. When
-        // updating to using plume, this was corrected, but it exposed an issue with NVIDIA drivers (since 580.105.08 only on Linux)
-        // where the wait() will take far more time than expected and cause stuttering. While this seems to work fine everywhere else,
-        // we stick to the pre-plume approach to be safe.
         if (device->getCapabilities().presentWait) {
-            swapChainDesc.maxFrameLatency = (chosenGraphicsAPI == UserConfiguration::GraphicsAPI::Vulkan) ? 2 : 1;
-            swapChainDesc.enablePresentWait = true;
+            // Enable present wait if supported by the device. We specify a max latency of 1 as we use it to wait right before the next
+            // presentation call is issued.
+            // 
+            // FIXME: RT64 used to have an error where the swap chain's wait() function would wait for one extra frame under Vulkan. When
+            // updating to using plume, this was corrected, but it exposed an issue with NVIDIA drivers (since 580.105.08 only on Linux)
+            // where the wait() will take far more time than expected and cause stuttering. While this seems to work fine everywhere else,
+            // we stick to the pre-plume approach to be safe.
+            bool usesPresentWait;
+#       if defined(__EMSCRIPTEN__)
+            // On a page present wait is always on, whatever presentWait says: WebGPU's wait() is no driver's present wait
+            // but plume's cap on the presents whose GPU work isn't done (at least 2, adapted up to 4), and the first
+            // present's wait for the device's setup to finish (plume_webgpu.h). Without it Firefox's queue grew seconds
+            // deep behind a GPU that fell behind, and the page showed a frame or two a second.
+            usesPresentWait = true;
+#       else
+            switch (userConfig.presentWait) {
+            case UserConfiguration::PresentWait::Enabled:
+                usesPresentWait = true;
+                break;
+            case UserConfiguration::PresentWait::Automatic: {
+#if defined(__linux__)
+                // Present wait on NVIDIA seems to be currently broken under some Linux distributions and is waiting one additional frame
+                // by accident, causing the final refresh rate to be 2/3rds of what it should be. Cause is currently unknown.
+                const bool isNVIDIA = deviceDescription.vendor == RenderDeviceVendor::NVIDIA;
+                usesPresentWait = !isNVIDIA;
+#else
+                usesPresentWait = true;
+#endif
+                break;
+            }
+            case UserConfiguration::PresentWait::Disabled:
+            default:
+                usesPresentWait = false;
+                break;
+            }
+#       endif
+
+            if (usesPresentWait) {
+                swapChainDesc.maxFrameLatency = (chosenGraphicsAPI == UserConfiguration::GraphicsAPI::Vulkan) ? 2 : 1;
+                swapChainDesc.enablePresentWait = true;
+            }
         }
 
         swapChain = presentGraphicsWorker->commandQueue->createSwapChain(swapChainDesc);
@@ -469,6 +510,7 @@ namespace RT64 {
         presentExt.sharedResources = sharedQueueResources.get();
         presentExt.shaderLibrary = shaderLibrary.get();
         presentExt.createdGraphicsAPI = chosenGraphicsAPI;
+        presentExt.swapChainPresentWaitEnabled = swapChainDesc.enablePresentWait;
         presentQueue->setup(presentExt);
 
         // Configure the state to use all the created components.

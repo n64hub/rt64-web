@@ -6,11 +6,11 @@
 
 #include "FbRendererCommon.hlsli"
 #include "Math.hlsli"
-#include "TextureDecoder.hlsli"
 
 #include "shared/rt64_other_mode.h"
 #include "shared/rt64_render_flags.h"
 #include "shared/rt64_render_params.h"
+#include "shared/rt64_texture_decoder.h"
 
 #define SIMULATE_LOW_PRECISION 1
 #define FIX_UPSCALING_PRECISION 1
@@ -36,7 +36,7 @@
 // it, and in Firefox 158, which builds pipelines one at a time, Majora's Mask's Clock Town took 9.3-10.4 s against
 // 15.1-18.2 s and Rush 2049's boot 11.9-12.6 s against 13.6-14.6 s (RTX 2070). Shaders with LOD keep the switch.
 #ifdef PER_DRAW_TEXTURES
-#define tileTMEM(gpuTile) ((gpuTile).textureIndex * RDP_TMEM_BYTES)
+#define tileTMEM(gpuTile) ((gpuTile).textureIndex * TMEM_RDP_BYTES)
 
 #define TILE_TEXTURE_SWITCH(gpuTile, TEXTURE_CALL) \
     switch ((gpuTile).drawSlot) { \

@@ -25,8 +25,16 @@
 #   include "utf8conv/utf8conv.h"
 #endif
 
+#if defined(__APPLE__)
+#   include "imgui/backends/imgui_impl_metal.h"
+#endif
+
 #if defined(_WIN32)
 #   include "plume_d3d12.h"
+#endif
+
+#if defined(__APPLE__)
+#   include "plume_metal.h"
 #endif
 
 static std::string IniFilenameUTF8;
@@ -47,7 +55,6 @@ namespace RT64 {
     struct VulkanContext {
         VkDevice device = VK_NULL_HANDLE;
         VkRenderPass renderPass = VK_NULL_HANDLE;
-        VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
 
         ~VulkanContext() {
 #       if defined(__EMSCRIPTEN__)
@@ -55,10 +62,6 @@ namespace RT64 {
 #       else
             if (renderPass != VK_NULL_HANDLE) {
                 vkDestroyRenderPass(device, renderPass, nullptr);
-            }
-
-            if (descriptorPool != VK_NULL_HANDLE) {
-                vkDestroyDescriptorPool(device, descriptorPool, nullptr);
             }
 #       endif
         }
@@ -443,7 +446,16 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
             const D3D12SwapChain *interfaceSwapChain = static_cast<const D3D12SwapChain *>(swapChain);
             const D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = interfaceDevice->viewHeapAllocator->getCPUHandleAt(interfaceDescriptorSet->viewAllocation.offset);
             const D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = interfaceDevice->viewHeapAllocator->getGPUHandleAt(interfaceDescriptorSet->viewAllocation.offset);
-            ImGui_ImplDX12_Init(interfaceDevice->d3d, 2, interfaceSwapChain->nativeFormat, interfaceDevice->viewHeapAllocator->heap, cpuHandle, gpuHandle);
+            ImGui_ImplDX12_InitInfo initInfo;
+            initInfo.Device = interfaceDevice->d3d;
+            initInfo.CommandQueue = interfaceSwapChain->commandQueue->d3d;
+            initInfo.NumFramesInFlight = 2;
+            initInfo.RTVFormat = interfaceSwapChain->nativeFormat;
+            initInfo.SrvDescriptorHeap = interfaceDevice->viewHeapAllocator->heap;
+            initInfo.LegacySingleSrvCpuDescriptor = cpuHandle;
+            initInfo.LegacySingleSrvGpuDescriptor = gpuHandle;
+
+            ImGui_ImplDX12_Init(&initInfo);
 #       else
             assert(false && "Unsupported Graphics API.");
             return;
@@ -457,7 +469,7 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
 #       else
             VulkanDevice *interfaceDevice = static_cast<VulkanDevice *>(device);
             const VulkanSwapChain *interfaceSwapChain = static_cast<const VulkanSwapChain *>(swapChain);
-            ImGui_ImplVulkan_LoadFunctions([](const char *functionName, void *vulkanInstance) {
+            ImGui_ImplVulkan_LoadFunctions(VK_API_VERSION_1_2, [](const char *functionName, void *vulkanInstance) {
                 return vkGetInstanceProcAddr(*(reinterpret_cast<VkInstance *>(vulkanInstance)), functionName);
             }, &interfaceDevice->renderInterface->instance);
 
@@ -467,7 +479,6 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
             vulkanContext = std::make_unique<VulkanContext>();
             vulkanContext->device = interfaceDevice->vk;
             vulkanContext->renderPass = VulkanGraphicsPipeline::createRenderPass(interfaceDevice, &interfaceSwapChain->pickedSurfaceFormat.format, 1, VK_FORMAT_UNDEFINED, VK_SAMPLE_COUNT_1_BIT);
-            vulkanContext->descriptorPool = VulkanDescriptorSet::createDescriptorPool(interfaceDevice, typeCounts, false);
 
             ImGui_ImplVulkan_InitInfo initInfo = {};
             initInfo.Instance = interfaceDevice->renderInterface->instance;
@@ -475,14 +486,23 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
             initInfo.Device = vulkanContext->device;
             initInfo.QueueFamily = interfaceSwapChain->commandQueue->familyIndex;
             initInfo.Queue = interfaceSwapChain->commandQueue->queue->vk;
-            initInfo.DescriptorPool = vulkanContext->descriptorPool;
-            initInfo.RenderPass = vulkanContext->renderPass;
-            initInfo.Subpass = 0;
+            initInfo.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE;
             initInfo.MinImageCount = 2;
             initInfo.ImageCount = 2;
             initInfo.CheckVkResultFn = &checkVulkanResult;
+            initInfo.PipelineInfoMain.RenderPass = vulkanContext->renderPass;
 
             ImGui_ImplVulkan_Init(&initInfo);
+#       endif
+            break;
+        }
+        case UserConfiguration::GraphicsAPI::Metal: {
+#       ifdef __APPLE__
+            MetalDevice *interfaceDevice = static_cast<MetalDevice *>(device);
+            ImGui_ImplMetal_Init(interfaceDevice->mtl);
+            ImGui_ImplMetal_CreateDeviceObjects(interfaceDevice->mtl);
+#       else
+            assert(false && "Unsupported Graphics API.");
 #       endif
             break;
         }
@@ -512,6 +532,14 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
         case UserConfiguration::GraphicsAPI::Vulkan: {
             ImGui_ImplVulkan_Shutdown();
             vulkanContext.reset(nullptr);
+            break;
+        }
+        case UserConfiguration::GraphicsAPI::Metal: {
+#       if defined(__APPLE__)
+            ImGui_ImplMetal_Shutdown();
+#       else
+            assert(false && "Unsupported Graphics API.");
+#       endif
             break;
         }
         default:
@@ -572,6 +600,14 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
             ImGui_ImplVulkan_NewFrame();
             break;
         }
+        case UserConfiguration::GraphicsAPI::Metal: {
+#       if defined(__APPLE__)
+            // New frame is delayed until the draw because it requires a render pass descriptor.
+#       else
+            assert(false && "Unsupported Graphics API.");
+#       endif
+            break;
+        }
         default:
             assert(false && "Unknown Graphics API.");
             break;
@@ -611,6 +647,27 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
 #       if !defined(__EMSCRIPTEN__)
                 VulkanCommandList *interfaceCommandList = static_cast<VulkanCommandList *>(commandList);
                 ImGui_ImplVulkan_RenderDrawData(drawData, interfaceCommandList->vk);
+#       endif
+                break;
+            }
+            case UserConfiguration::GraphicsAPI::Metal: {
+#       if defined(__APPLE__)
+                NS::AutoreleasePool *pool = NS::AutoreleasePool::alloc()->init();
+                MetalCommandList *interfaceCommandList = static_cast<MetalCommandList *>(commandList);
+                interfaceCommandList->checkActiveRenderEncoder();
+
+                // Create a render pass descriptor for the only color target in the swap chain.
+                MTL::RenderPassDescriptor *renderDescriptor = MTL::RenderPassDescriptor::renderPassDescriptor();
+                MTL::RenderPassColorAttachmentDescriptor *colorAttachment = renderDescriptor->colorAttachments()->object(0);
+                colorAttachment->setTexture(interfaceCommandList->targetFramebuffer->colorAttachments[0].getTexture());
+                colorAttachment->setLoadAction(MTL::LoadActionLoad);
+                colorAttachment->setStoreAction(MTL::StoreActionStore);
+
+                ImGui_ImplMetal_NewFrame(renderDescriptor);
+                ImGui_ImplMetal_RenderDrawData(drawData, interfaceCommandList->mtl, interfaceCommandList->activeRenderEncoder);
+                pool->release();
+#       else
+                assert(false && "Unsupported Graphics API.");
 #       endif
                 break;
             }

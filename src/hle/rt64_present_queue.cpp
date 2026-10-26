@@ -163,7 +163,9 @@ namespace RT64 {
         // Present the VI specified by the event.
         // Attempt to find the matching framebuffer for the VI based on the origin address.
         // If that fails, we look at the shared storage.
-        if (present.screenVI.visible()) {
+        const bool viVisible = present.screenVI.visible();
+        hlslpp::uint2 fbSize = viVisible ? present.screenVI.fbSize() : hlslpp::uint2();
+        if (viVisible && (fbSize.x > 0) && (fbSize.y > 0)) {
             Framebuffer *viFb = nullptr;
             if (!viewRDRAM) {
                 viFb = fbManager.find(present.screenVI.fbAddress());
@@ -245,7 +247,6 @@ namespace RT64 {
                 uint32_t fbAddress = present.screenVI.fbAddress();
 
                 // Use a scratch framebuffer to upload the RAM to the render target.
-                hlslpp::uint2 fbSize = present.screenVI.fbSize();
                 scratchFb.addressStart = fbAddress;
                 scratchFb.width = fbSize.x;
                 scratchFb.height = fbSize.y;
@@ -458,7 +459,7 @@ namespace RT64 {
                 }
 #           endif
 
-                if (presentWaitEnabled) {
+                if (ext.swapChainPresentWaitEnabled) {
                     PhaseTimer phaseTimer(this, PhaseWait);
                     ext.swapChain->wait();
                 }
@@ -694,9 +695,6 @@ namespace RT64 {
         while (drawSemaphores.size() < ext.swapChain->getTextureCount()) {
             drawSemaphores.emplace_back(ext.device->createCommandSemaphore());
         }
-
-        // Since the swap chain might not need a resize right away, detect present wait.
-        presentWaitEnabled = ext.device->getCapabilities().presentWait;
 
         int processCursor = -1;
         bool skipPresent = false;
