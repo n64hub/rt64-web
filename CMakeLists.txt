@@ -19,6 +19,7 @@ option(RT64_FLIPPED_RECT_HIGH_RES "Sample a high-res replacement on a rect drawn
 option(RT64_UNEVEN_FRAME_RATES "Interpolate a game whose last frames took an uneven number of VIs (the slowest at most twice the fastest) at the rate of the fastest, not leave it uninterpolated (always on with Emscripten)" OFF)
 option(RT64_OFFSCREEN_WORKLOADS "A workload that draws only to framebuffers the VI has not shown is a pass of the next one's game frame, so a game that draws such a pass in a display list of its own interpolates (always on with Emscripten)" OFF)
 option(RT64_FREE_DISCARDED_TARGETS "Free the render targets of a framebuffer whose RAM the CPU overwrote once nothing draws to it again for a few seconds, so a game that moves its framebuffers (one per level) does not keep every one on the GPU (always on with Emscripten)" OFF)
+option(RT64_INTERPOLATE_CAMERA_EYE "Interpolate a camera's eye between two game frames on the line between its two places, not by lerping the view's translation, which is the eye in the view's own axes (always on with Emscripten)" OFF)
 
 if (NOT ${RT64_STATIC})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -539,6 +540,9 @@ if (RT64_FREE_DISCARDED_TARGETS OR RT64_WGSL)
 endif()
 if (RT64_UNEVEN_FRAME_RATES OR RT64_WGSL)
     target_compile_definitions(rt64 PUBLIC RT64_UNEVEN_FRAME_RATES=1)
+endif()
+if (RT64_INTERPOLATE_CAMERA_EYE OR RT64_WGSL)
+    target_compile_definitions(rt64 PRIVATE RT64_INTERPOLATE_CAMERA_EYE=1)
 endif()
 
 # Add common libraries.

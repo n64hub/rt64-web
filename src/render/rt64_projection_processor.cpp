@@ -4,6 +4,10 @@
 
 #include "rt64_projection_processor.h"
 
+#if RT64_INTERPOLATE_CAMERA_EYE
+#   include <cmath>
+#endif
+
 #include "common/rt64_math.h"
 #include "hle/rt64_workload_queue.h"
 
@@ -14,6 +18,22 @@ namespace RT64 {
         matrix[2][0] *= aspectRatioScale;
         matrix[3][0] *= aspectRatioScale;
     }
+
+#if RT64_INTERPOLATE_CAMERA_EYE
+    // The eye of a view matrix, the point it moves to the origin, or false for a view without one (a zero matrix).
+    inline bool viewEye(const hlslpp::float4x4 &view, hlslpp::float3 &eye) {
+        eye = -hlslpp::mul(hlslpp::float3(view[3].xyz), hlslpp::inverse(extract3x3(view)));
+        return std::isfinite(float(eye.x)) && std::isfinite(float(eye.y)) && std::isfinite(float(eye.z));
+    }
+
+    // Puts a view's eye at a point, keeping its axes.
+    inline void setViewEye(interop::float4x4 &view, const hlslpp::float3 &eye) {
+        const hlslpp::float3 translation = -hlslpp::mul(eye, extract3x3(view));
+        view[3][0] = translation.x;
+        view[3][1] = translation.y;
+        view[3][2] = translation.z;
+    }
+#endif
     
     // ProjectionProcessor
 
@@ -123,6 +143,18 @@ namespace RT64 {
                 adjustProjectionMatrix(adjustedPrevProj, projRatioScale);
                 viewMatrix = rigidBody->lerp(p.curFrameWeight, *prevViewMatrix, curViewTransform, true);
                 prevViewTransform = rigidBody->lerp(p.prevFrameWeight, *prevViewMatrix, curViewTransform, true);
+
+#           if RT64_INTERPOLATE_CAMERA_EYE
+                // The view's translation is the eye in the view's own axes, so lerping it took the eye of a camera far from the
+                // world's origin off the line between its two places as the camera turned, and what is near the camera swung
+                // in the frames between. The eye is lerped instead (kept at the current one when the position isn't), and
+                // each lerped view's translation is put back from it.
+                hlslpp::float3 prevEye, curEye;
+                if (viewEye(*prevViewMatrix, prevEye) && viewEye(curViewTransform, curEye)) {
+                    setViewEye(viewMatrix, rigidBody->lerpTranslation ? hlslpp::lerp(prevEye, curEye, p.curFrameWeight) : curEye);
+                    setViewEye(prevViewTransform, rigidBody->lerpTranslation ? hlslpp::lerp(prevEye, curEye, p.prevFrameWeight) : curEye);
+                }
+#           endif
 
                 // We only interpolate the projection if the view matrix has been interpolated.
                 const bool interpolateProjection = rigidBody->lerpTranslation || rigidBody->lerpRotation;
