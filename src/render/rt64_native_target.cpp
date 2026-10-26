@@ -151,6 +151,15 @@ namespace RT64 {
 
             readBuffer.readDescSet->setBuffer(readBuffer.readDescSet->gCurInput, previousReadBuffer->nativeBuffer.get(), previousReadBuffer->nativeBufferSize, previousBufferView);
         }
+#   if defined(__EMSCRIPTEN__)
+        // Without a previous buffer the set keeps whatever buffer gCurInput was given the last time, which a later
+        // createReadBuffer() of that slot may have freed since. Plume's WebGPU set builds its bind group from every
+        // binding at the next dispatch that uses it, so it would read the freed buffer, where a native backend wrote
+        // the descriptor once and never looks at it again. FbReadAnyFullCS doesn't read gCurInput.
+        else {
+            readBuffer.readDescSet->setBuffer(readBuffer.readDescSet->gCurInput, nullptr);
+        }
+#   endif
 
         void *dstData = readBuffer.nativeUploadBuffer->map();
         memcpy(dstData, data, bufferSize);
