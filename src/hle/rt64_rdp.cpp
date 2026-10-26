@@ -1199,6 +1199,9 @@ namespace RT64 {
         // tolerance of one pixel from the scissor coordinates.
         const FixedRect &scissorRect = state->rdp->scissorRectStack[scissorStackSize - 1];
         const bool fixRectLR = state->ext.enhancementConfig->rect.fixRectLR;
+#   if defined(__EMSCRIPTEN__)
+        const int32_t gameLry = lry;
+#   endif
         if (!scissorRect.isNull() && fixRectLR) {
             if ((abs(scissorRect.lrx - lrx) <= 4) && (ulx < scissorRect.lrx)) {
                 lrx = scissorRect.lrx;
@@ -1328,6 +1331,28 @@ namespace RT64 {
             updateCallTexcoords(u1, v1);
             updateCallTexcoords(u2, v2);
         }
+
+#   if defined(__EMSCRIPTEN__)
+        // Fix LR with Scissor can stretch a rectangle by a row the game doesn't draw, and that row samples past a
+        // framebuffer row's tile copy (FramebufferManager::checkRowTileCopy), which then can't be used. Perfect Dark's
+        // night vision copies the framebuffer a row at a time and its second to last row ends a pixel above the scissor:
+        // that row's texture came from TMEM instead, one wait a frame for the GPU and the framebuffers back in RAM. A
+        // row's tile copy is judged by the game's own rectangle; the added row samples past the copy, as it sampled past
+        // the row loaded in TMEM.
+        if ((lry != gameLry) && !flip && (dtdy > 0)) {
+            const FixedRect gameRect(drawRect.ulx, drawRect.uly, drawRect.lrx, gameLry);
+            if (!gameRect.isEmpty()) {
+                const int32_t gameLrt = ((ult << 7) + dtdy * (gameRect.height(true, true) << 2)) >> 7;
+                const int32_t gameMaxT = int32_t(ceilf(gameLrt / 32.0f + vFractionOffset));
+                for (uint32_t t = 0; t < drawCall.tileCount; t++) {
+                    DrawCallTile &callTile = workload.drawData.callTiles[drawCall.tileIndex + t];
+                    if (callTile.rowTileCopy) {
+                        callTile.maxTexcoord.y = std::min(callTile.maxTexcoord.y, gameMaxT);
+                    }
+                }
+            }
+        }
+#   endif
     }
 
     void RDP::drawTexRect(int32_t ulx, int32_t uly, int32_t lrx, int32_t lry, uint8_t tile, int16_t uls, int16_t ult, int16_t dsdx, int16_t dtdy, bool flip) {
