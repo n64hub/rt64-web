@@ -667,11 +667,20 @@ namespace RT64 {
     FramebufferManager::CheckCopyResult FramebufferManager::checkRegionsTMEM(uint32_t tmemStart, uint32_t tmemEnd, uint32_t lineWidth, uint8_t siz, uint8_t fmt, uint16_t uls, bool usesTLUT, uint8_t palette) {
         const bool RGBA32 = (siz == G_IM_SIZ_32b) && (fmt == G_IM_FMT_RGBA);
         CheckCopyResult result;
+#   if defined(__EMSCRIPTEN__)
+        uint32_t syncTMEMStart = tmemEnd;
+#   endif
         auto it = activeRegionsTMEM.begin();
         while (it != activeRegionsTMEM.end()) {
             if (!result.syncRequired && it->syncRequired && (tmemStart < it->tmemEnd) && (it->tmemStart < tmemEnd)) {
                 result.syncRequired = true;
             }
+
+#       if defined(__EMSCRIPTEN__)
+            if (it->syncRequired && (tmemStart < it->tmemEnd) && (it->tmemStart < tmemEnd)) {
+                syncTMEMStart = std::min(syncTMEMStart, std::max(it->tmemStart, tmemStart));
+            }
+#       endif
 
             if (it->fbTile.valid() && (tmemStart >= it->tmemStart) && (tmemEnd <= it->tmemEnd)) {
                 bool validCopy = false;
@@ -766,12 +775,23 @@ namespace RT64 {
             it++;
         }
 
+#   if defined(__EMSCRIPTEN__)
+        if (result.syncRequired && !RGBA32) {
+            result.syncTMEMStart = syncTMEMStart;
+        }
+#   endif
+
         // When using TLUT or RGBA32, the upper region of TMEM must also be checked for possible synchronizations,
         // as it is sampled by the texture. It's not really necessary to check all possible individual
         // pixels sampled by the texture, so we check for the entire upper region of TMEM when it's CI8,
         // and only the pixels indicated by the palette value when it's CI4. If it's RGBA32, we just offset
         // the current region being checked into the upper area of TMEM.
+#   if defined(__EMSCRIPTEN__)
+        // The TLUT is checked when the range asked for a sync too, since fullSync() can find the call samples none of it.
+        if (usesTLUT && (!result.syncRequired || (result.syncTMEMStart > 0))) {
+#   else
         if (usesTLUT && !result.syncRequired) {
+#   endif
             if (RGBA32) {
                 tmemStart += 256;
                 tmemEnd += 256;
@@ -789,6 +809,9 @@ namespace RT64 {
             while (it != activeRegionsTMEM.end()) {
                 if (it->syncRequired && (tmemStart < it->tmemEnd) && (it->tmemStart < tmemEnd)) {
                     result.syncRequired = true;
+#               if defined(__EMSCRIPTEN__)
+                    result.syncTMEMStart = 0;
+#               endif
                     break;
                 }
 

@@ -108,6 +108,11 @@ namespace RT64 {
             uint8_t fmt = 0;
             bool reinterpret = false;
             bool syncRequired = false;
+#       if defined(__EMSCRIPTEN__)
+            // Where the TMEM that asks for the sync begins in the range checked, the TLUT's not among it: a call whose
+            // texcoords end before it needs no sync (State::fullSync()). 0 when the sync can't be told apart that way.
+            uint32_t syncTMEMStart = 0;
+#       endif
 
             CheckCopyResult() = default;
 

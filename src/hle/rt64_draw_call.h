@@ -151,6 +151,10 @@ namespace RT64 {
         // call's texcoords leave it.
         bool rowTileCopy;
         uint64_t rowTileFallbackHash;
+
+        // Where the TMEM that asks for the sync begins (FramebufferManager::CheckCopyResult::syncTMEMStart), 0 if the
+        // sync is asked for whatever the call samples.
+        uint32_t syncTMEMStart;
 #   endif
         uint16_t tileCopyWidth;
         uint16_t tileCopyHeight;

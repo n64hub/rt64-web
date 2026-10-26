@@ -372,6 +372,10 @@ namespace RT64 {
                     dstCallTile.syncRequired = checkResult.syncRequired;
 
 #               if defined(__EMSCRIPTEN__)
+                    // A range that wrapped around TMEM is no longer the start of what the call samples.
+                    const bool checkWrapped = ((((RGBA32 || usesTLUT) ? (tile.tmem & RDP_TMEM_MASK128) : tile.tmem) + (bytesToHash >> 3)) > tmemSize);
+                    dstCallTile.syncTMEMStart = checkWrapped ? 0 : checkResult.syncTMEMStart;
+
                     // A framebuffer row loaded as a block at the tile's TMEM address can be sampled from its tile copy
                     // whatever the tile's size and line say, which only bound what it could sample: whether the call's
                     // texcoords stay inside the row is checked in fullSync(), as for any tile copy. Perfect Dark's night
@@ -409,7 +413,12 @@ namespace RT64 {
                         dstCallTile.tileCopyUsed = false;
                         dstCallTile.tmemHashOrID = rdp->tileReplacementHashes[tileIndex];
 
+#                   if defined(__EMSCRIPTEN__)
+                        // A sync that the call's texcoords may not need is left to fullSync(), which knows them.
+                        if (checkResult.syncRequired && (dstCallTile.syncTMEMStart == 0)) {
+#                   else
                         if (checkResult.syncRequired) {
+#                   endif
                             FramebufferPair &fbPair = workload.fbPairs[workload.currentFramebufferPairIndex()];
                             fbPair.syncRequired = true;
                         }
@@ -1018,6 +1027,36 @@ namespace RT64 {
                 }
 
             }
+
+#       if defined(__EMSCRIPTEN__)
+            // A sync left here when the call was made (syncTMEMStart) is needed only if what the call's texcoords sample of
+            // TMEM reaches the TMEM that asked for it. The range checked then came from the tile's size or mask, which can be
+            // larger than what is drawn: Perfect Dark's HUD text draws each glyph, 7 words of TMEM, through a 32x32 CI4 tile
+            // of line 1, which reaches 33 words, and with the night vision goggles on, the rest of the goggles' last
+            // framebuffer row is still in TMEM past the glyph. That asked for a sync at the first glyph after each of the
+            // goggles' two passes, every frame: two waits a frame for the GPU to finish and the framebuffers to come back
+            // to RAM. Texcoords that leave the tile's start (wrapped or mirrored back) keep the sync.
+            if (callTile.syncRequired && !callTile.tileCopyUsed && (callTile.syncTMEMStart > 0) &&
+                (callTile.minTexcoord.x <= callTile.maxTexcoord.x) && (callTile.minTexcoord.y <= callTile.maxTexcoord.y))
+            {
+                const auto &loadTile = callTile.loadTile;
+                const float xScale = ShiftScaleMap[loadTile.shifts];
+                const float yScale = ShiftScaleMap[loadTile.shiftt];
+                const int32_t minS = int(callTile.minTexcoord.x * xScale) - (loadTile.uls >> 2);
+                const int32_t minT = int(callTile.minTexcoord.y * yScale) - (loadTile.ult >> 2);
+                const int32_t maxS = int(ceilf(callTile.maxTexcoord.x * xScale)) - (loadTile.uls >> 2);
+                const int32_t maxT = int(ceilf(callTile.maxTexcoord.y * yScale)) - (loadTile.ult >> 2);
+                if ((minS >= 0) && (minT >= 0)) {
+                    const uint32_t texels = uint32_t(std::clamp(maxS, 1, int32_t(callTile.sampleWidth)));
+                    const uint32_t rows = uint32_t(std::clamp(maxT, 1, int32_t(callTile.sampleHeight)));
+                    const uint32_t bytes = (loadTile.line << 3) * (rows - 1) + (texels << std::min(loadTile.siz, uint8_t(G_IM_SIZ_16b)) >> 1);
+                    const uint32_t sampledEnd = loadTile.tmem + ((bytes + 7) >> 3);
+                    if (sampledEnd <= callTile.syncTMEMStart) {
+                        callTile.syncRequired = false;
+                    }
+                }
+            }
+#       endif
 
             // The rest of the validation doesn't apply to tiles that aren't GPU copies or sampling TMEM directly.
             if (!callTile.tileCopyUsed && !callTile.rawTMEM) {
