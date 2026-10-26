@@ -142,15 +142,6 @@ namespace RT64 {
 
                 // We only interpolate the projection if the view matrix has been interpolated.
                 const bool interpolateProjection = rigidBody->lerpTranslation || rigidBody->lerpRotation;
-                if (interpolateProjection) {
-                    projMatrix = lerpMatrix(adjustedPrevProj, curProjTransform, p.curFrameWeight);
-                    prevProjTransform = lerpMatrix(adjustedPrevProj, curProjTransform, p.prevFrameWeight);
-                }
-                else {
-                    projMatrix = curProjTransform;
-                    prevProjTransform = curProjTransform;
-                }
-
 #           if RT64_INTERPOLATE_CAMERA_EYE
                 // The view's translation is the eye in the view's own axes, so lerping it took the eye of a camera far from the
                 // world's origin off the line between its two places as the camera turned, and what is near the camera swung
@@ -162,6 +153,15 @@ namespace RT64 {
                     setViewEye(prevViewTransform, rigidBody->lerpTranslation ? hlslpp::lerp(prevEye, curEye, p.prevFrameWeight) : curEye);
                 }
 #           endif
+
+                if (interpolateProjection) {
+                    projMatrix = lerpMatrix(adjustedPrevProj, curProjTransform, p.curFrameWeight);
+                    prevProjTransform = lerpMatrix(adjustedPrevProj, curProjTransform, p.prevFrameWeight);
+                }
+                else {
+                    projMatrix = curProjTransform;
+                    prevProjTransform = curProjTransform;
+                }
             }
             else {
                 prevViewTransform = viewMatrix;
