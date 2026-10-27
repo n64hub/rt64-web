@@ -7,8 +7,6 @@
 #include "shared/rt64_hlsl.h"
 #include "shared/rt64_video_interface.h"
 
-#include <cmath>
-
 namespace RT64 {
     // VIRenderer
 
@@ -46,7 +44,7 @@ namespace RT64 {
         // row past the viewport's last whole one: a viewport from 0.35 to 899.65 left the canvas's last row black, though
         // its centre at 899.5 is inside. Rounding moves the picture's edges by half a pixel at most.
         const hlslpp::float2 windowCoordinate = windowCenter + relativeCoordinate * relativeScale;
-        return { std::round(float(windowCoordinate.x)), std::round(float(windowCoordinate.y)) };
+        return { roundf(float(windowCoordinate.x)), roundf(float(windowCoordinate.y)) };
 #   else
         return windowCenter + relativeCoordinate * relativeScale;
 #   endif
