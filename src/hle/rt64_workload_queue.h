@@ -125,9 +125,9 @@ namespace RT64 {
         mutable uint64_t heldWorkloadId = 0;
         mutable std::chrono::steady_clock::time_point heldSince;
 
-        // With the environment variable RT64_FRAME_LOG set, each game frame is printed to stderr as it ends
-        // (logGameFrame()), and each present the game queues and each wait for a workload as they come: to tell a frame
-        // drawn in parts from a frame matched wrongly against the one before.
+        // With the environment variable RT64_FRAME_LOG set (a page: opened with ?frame-log), each game frame is printed to
+        // stderr as it ends (logGameFrame()), and each present the game queues and each wait for a workload as they come:
+        // to tell a frame drawn in parts from a frame matched wrongly against the one before.
         bool frameLog = false;
 #   endif
         std::mutex workloadIdMutex;

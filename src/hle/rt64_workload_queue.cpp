@@ -11,6 +11,10 @@
 #include <cstdio>
 #include <cstdlib>
 
+#if defined(__EMSCRIPTEN__)
+#   include <emscripten.h>
+#endif
+
 #define ENABLE_HIGH_RESOLUTION_RENDERER 1
 
 namespace RT64 {
@@ -284,6 +288,10 @@ namespace RT64 {
 
 #   if RT64_GAME_FRAME_WORKLOADS
         frameLog = (getenv("RT64_FRAME_LOG") != nullptr);
+#       if defined(__EMSCRIPTEN__)
+        // A page has no environment of its own: one opened with ?frame-log prints the log to the console.
+        frameLog = frameLog || (MAIN_THREAD_EM_ASM_INT({ return new URLSearchParams(location.search).has('frame-log') ? 1 : 0; }) != 0);
+#       endif
 #   endif
 
         rspProcessor = std::make_unique<RSPProcessor>(ext.device);

@@ -74,7 +74,12 @@ namespace RT64 {
         uploads.clear();
 
         for (uint32_t w : p.curFrame->workloads) {
-            const bool prevFrameValid = (p.prevFrame != nullptr);
+            // As process() decides it: a workload of a game frame of several (RT64_GAME_FRAME_WORKLOADS) that wasn't paired
+            // with one of the frame before's has no interpolated transforms, and its own are drawn. Decided for the frame,
+            // the empty vectors' storage was uploaded as its transforms, and between the game's frames whatever it held drew:
+            // Mario Party 2's next frame, drawn into the framebuffer it hadn't shown yet as a turn began, made one frame of
+            // twice the workloads, and its background's tiles drew off the screen, leaving the black behind them.
+            const bool prevFrameValid = (p.prevFrame != nullptr) && p.curFrame->frameMap.workloads[w].mapped;
             Workload &workload = p.workloadQueue->workloads[w];
             const DrawData &drawData = workload.drawData;
             DrawBuffers &drawBuffers = workload.drawBuffers;
