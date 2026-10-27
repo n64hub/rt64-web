@@ -72,6 +72,28 @@ namespace RT64 {
         ditherPatterns[ditherIndex]++;
     }
 
+    void FramebufferPair::mergeScissor(const FixedRect &rect) {
+#   if RT64_SCISSOR_INSIDE_FRAMEBUFFER
+        // RT64_SCISSOR_INSIDE_FRAMEBUFFER: scissorRect is the area the pair drew in, which the projection processor and
+        // the framebuffer renderer compare a projection's or a rect's own against to tell what covers the frame's whole
+        // width: a 3D view or a 2D projection whose aspect RT64 picks (G_EX_ASPECT_AUTO) is kept at its aspect, and a
+        // fill of the whole screen is widened to the window's edges. An extended scissor aligned to the centre that
+        // reaches past 4:3 (gEXSetScissor with G_EX_ORIGIN_CENTER and offsets, which a widescreen patch draws a screen
+        // wipe's colour out to the window's edges under) is far past the framebuffer's left and right edges in the
+        // framebuffer's own coordinates, so on each frame that drew under one nothing else covered the whole width:
+        // a board's sprites, its HUD and a title card among them, were drawn stretched to the window's width for that
+        // frame. What is past the framebuffer's edges counts only to them.
+        FixedRect inside = rect;
+        inside.ulx = std::max(inside.ulx, 0);
+        inside.lrx = std::min(inside.lrx, int32_t(colorImage.width) << 2);
+        if (!inside.isNull()) {
+            scissorRect.merge(inside);
+        }
+#   else
+        scissorRect.merge(rect);
+#   endif
+    }
+
     bool FramebufferPair::inProjection(uint32_t transformsIndex, Projection::Type type) const {
         if (projectionCount > 0) {
             const Projection &lastProj = projections[projectionCount - 1];

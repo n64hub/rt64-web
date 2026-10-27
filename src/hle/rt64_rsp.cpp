@@ -1179,7 +1179,7 @@ namespace RT64 {
         }
 
         if (visibleTri && !scissorRect.isNull()) {
-            fbPair.scissorRect.merge(scissorRect);
+            fbPair.mergeScissor(scissorRect);
 
             FixedRect drawRect = unprojectable ? scissorRect : FixedRect();
             for (int i = 0; (i < 3) && !unprojectable; i++) {

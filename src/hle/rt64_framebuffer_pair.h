@@ -74,6 +74,7 @@ namespace RT64 {
 
         void reset();
         void addGameCall(const GameCall &gameCall);
+        void mergeScissor(const FixedRect &rect);
         bool inProjection(uint32_t transformsIndex, Projection::Type type) const;
         int changeProjection(uint32_t transformsIndex, Projection::Type type);
         bool isEmpty() const;

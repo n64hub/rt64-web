@@ -1209,7 +1209,7 @@ namespace RT64 {
 
         const FixedRect &scissorRect = state->rdp->scissorRectStack[scissorStackSize - 1];
         if (!scissorRect.isNull()) {
-            fbPair.scissorRect.merge(scissorRect);
+            fbPair.mergeScissor(scissorRect);
 
             FixedRect drawRect;
             for (uint32_t i = 0; i < triCount * 3; i++) {
@@ -1288,7 +1288,7 @@ namespace RT64 {
         }
 
         if (!scissorRect.isNull()) {
-            fbPair.scissorRect.merge(scissorRect);
+            fbPair.mergeScissor(scissorRect);
 
             const FixedRect intRect = scissorRect.intersection(drawRect);
             if (!intRect.isNull()) {
