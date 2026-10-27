@@ -150,6 +150,7 @@ namespace RT64 {
     const GBIInstance   L3DEX_1_23                = { "L3DEX 1.23",                                GBIUCode::Unknown,     { false,  false,  false,  false,  false } }; // Needs confirmation.
     const GBIInstance   L3DEX_1_23_A              = { "L3DEX 1.23 (Variant)",                      GBIUCode::Unknown,     { false,  false,  false,  false,  false } }; // Needs confirmation.
     const GBIInstance   L3DEX2_FIFO_2_05          = { "L3DEX2.fifo 2.05",                          GBIUCode::L3DEX2,      { false,  false,  false,  false,  false } }; // Needs confirmation.
+    const GBIInstance   L3DEX2_FIFO_2_06          = { "L3DEX2.fifo 2.06",                          GBIUCode::L3DEX2,      { false,  false,  false,  false,  false } };
     const GBIInstance   L3DEX2_FIFO_ACCLAIM       = { "L3DEX2.fifo 2.05 (Acclaim)",                GBIUCode::Unknown,     { false,  false,  false,  false,  false } }; // Needs confirmation.
     const GBIInstance   L3DEX2_FIFO_2_08          = { "L3DEX2.fifo 2.08",                          GBIUCode::L3DEX2,      { false,  false,  false,  false,  false } }; // Needs confirmation.
     const GBIInstance   ZSORTP_0_33               = { "ZSortp 0.33",                               GBIUCode::Unknown,     { false,  false,  false,  false,  false } }; // Needs confirmation.
@@ -251,13 +252,13 @@ namespace RT64 {
             GBISegment{ 0xF68,      0x75A9F04BCF222D6AULL,  { &L3DEX_1_00 } }, // Needs confirmation.
             GBISegment{ 0xFF0,      0xCFAEE316F8AF900CULL,  { &L3DEX_1_21, &L3DEX_1_23_A } }, // Needs confirmation.
             GBISegment{ 0xFF0,      0xC8D5E51F62D4F740ULL,  { &L3DEX_1_23 } }, // Needs confirmation.
-            GBISegment{ 0x1190,     0xA2F9906594260FD4ULL,  { &L3DEX2_FIFO_2_05 } }, // Needs confirmation.
+            GBISegment{ 0x1190,     0xA2F9906594260FD4ULL,  { &L3DEX2_FIFO_2_05, &L3DEX2_FIFO_2_06 } }, // Needs confirmation.
             GBISegment{ 0x1190,     0x019210E4F59B27C1ULL,  { &L3DEX2_FIFO_ACCLAIM } }, // Needs confirmation.
             GBISegment{ 0x1190,     0x60B6BA671EE6F1F6ULL,  { &L3DEX2_FIFO_2_08 } }, // Needs confirmation.
             GBISegment{ 0x10B0,     0xE8028E4BC6529E6EULL,  { &ZSORTP_0_33 } }, // Needs confirmation.
     };
 
-    static std::array<GBISegment, 105> dataSegments = {
+    static std::array<GBISegment, 106> dataSegments = {
             GBISegment{ 0x800,      0xEEB10D73400213B3ULL,  { &F3D_SDK_E } }, // Needs confirmation.
             GBISegment{ 0x800,      0x49651E384B48F694ULL,  { &F3D_SDK_F } }, // Needs confirmation.
             GBISegment{ 0x800,      0x1A736198F90E81C5ULL,  { &F3D_SDK_UNKNOWN_G } }, // Needs confirmation.
@@ -360,6 +361,7 @@ namespace RT64 {
             GBISegment{ 0x800,      0x880EF9B9011CB11EULL,  { &L3DEX_1_23 } }, // Needs confirmation.
             GBISegment{ 0x800,      0x67315143B3DE852EULL,  { &L3DEX_1_23_A } }, // Needs confirmation.
             GBISegment{ 0x3F0,      0x58F659DEBA493C69ULL,  { &L3DEX2_FIFO_2_05 } }, // Needs confirmation.
+            GBISegment{ 0x3F0,      0x56A837AB6D5BB446ULL,  { &L3DEX2_FIFO_2_06 } },
             GBISegment{ 0x3F0,      0x772E4F4BD7F82DEFULL,  { &L3DEX2_FIFO_ACCLAIM } }, // Needs confirmation.
             GBISegment{ 0x3F0,      0xE261C98A63863DB4ULL,  { &L3DEX2_FIFO_2_08 } }, // Needs confirmation.
             GBISegment{ 0x400,      0x8F5D64011662220CULL,  { &ZSORTP_0_33 } }, // Needs confirmation.
