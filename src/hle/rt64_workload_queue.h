@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 
 #include "common/rt64_enhancement_configuration.h"
 #include "common/rt64_profiling_timer.h"
@@ -40,6 +41,12 @@
 
 namespace RT64 {
     struct PresentQueue;
+
+#if RT64_GAME_FRAME_WORKLOADS
+    // How long a game frame with fewer workloads that draw than the one before is held back from ending at a wait
+    // (WorkloadQueue::endedGameFrame()): two VIs at 60 Hz, which the present waiting for it is delayed by at most.
+    constexpr std::chrono::milliseconds HeldFrameLimit(34);
+#endif
 
 #if defined(__EMSCRIPTEN__)
     // How many color targets a page's interpolated frames take turns in (WorkloadQueue::renderThreadLoop): 8 hold every
@@ -99,6 +106,12 @@ namespace RT64 {
         std::array<QueuedPresent, 8> queuedPresents;
         uint32_t queuedPresentCursor = 0;
         uint64_t waitedWorkloadId = 0;
+
+        // How many workloads that draw the last game frame had, and since when a frame with fewer has been held back from
+        // ending where a wait came (endedGameFrame()).
+        uint32_t lastFrameDrawnCount = 0;
+        mutable uint64_t heldWorkloadId = 0;
+        mutable std::chrono::steady_clock::time_point heldSince;
 #   endif
         std::mutex workloadIdMutex;
         std::condition_variable workloadIdCondition;

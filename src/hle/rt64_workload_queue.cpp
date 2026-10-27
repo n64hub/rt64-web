@@ -49,6 +49,8 @@ namespace RT64 {
         queuedPresents = {};
         queuedPresentCursor = 0;
         waitedWorkloadId = 0;
+        lastFrameDrawnCount = 0;
+        heldWorkloadId = 0;
 #   endif
     }
 
@@ -91,7 +93,12 @@ namespace RT64 {
     // - before a workload that starts the next one: an offscreen pass (Workload::offscreenOnly), or one that draws to
     //   another framebuffer the VI shows, as the next frame of a game with two or three does, after one that has drawn,
     // - where something waits for one of its workloads (waitForWorkloadId(): a present whose workload is the next
-    //   frame's offscreen pass, the setup's warm-up, a pause),
+    //   frame's offscreen pass, the setup's warm-up, a pause), once it has as many workloads that draw as the frame
+    //   before had, or after HeldFrameLimit: a present that shows the frame before can come in the middle of the next
+    //   one, and a frame ended there was drawn in two, each part matched against the whole frame before. Mario Party's
+    //   board, whose frames are six RSP tasks and whose VI shows its frame now and then after four of the next one's,
+    //   about every 0.4 s, drew Toad tiny and an object near him huge between its frames; the rest of each such frame
+    //   came 16-18 ms after the wait,
     // - where the queue is full, so the game never waits for a frame that can't end (WORKLOAD_QUEUE_SIZE),
     // - and a workload the debugger repeats while paused is a frame of its own, as every workload was before.
     // Workloads that draw nothing are part of the frame they are queued in. Called with cursorMutex held.
@@ -101,6 +108,7 @@ namespace RT64 {
         bool drawsShown = false;
         uint32_t shownFbAddress = 0;
         bool waitedFor = false;
+        uint32_t drawnCount = 0;
         for (int c = startCursor; c != writeCursor; c = (c + 1) % queueSize) {
             const Workload &workload = workloads[c];
             if (workload.paused) {
@@ -112,6 +120,10 @@ namespace RT64 {
             }
 
             count++;
+            if (workload.fbPairCount > 0) {
+                drawnCount++;
+            }
+
             if (workload.drawsShown) {
                 drawsShown = true;
                 shownFbAddress = workload.shownFbAddress;
@@ -129,7 +141,29 @@ namespace RT64 {
         }
 
         const bool queueFull = ((writeCursor + 1) % queueSize) == uint32_t(barrierCursor);
-        return (waitedFor || queueFull) ? count : 0;
+        if (queueFull) {
+            return count;
+        }
+
+        if (!waitedFor) {
+            return 0;
+        }
+
+        // A frame with fewer workloads that draw than the one before is held for the rest of them, up to HeldFrameLimit.
+        if (drawsShown && (drawnCount < lastFrameDrawnCount)) {
+            const uint64_t firstWorkloadId = workloads[startCursor].workloadId;
+            const auto now = std::chrono::steady_clock::now();
+            if (heldWorkloadId != firstWorkloadId) {
+                heldWorkloadId = firstWorkloadId;
+                heldSince = now;
+            }
+
+            if ((now - heldSince) < HeldFrameLimit) {
+                return 0;
+            }
+        }
+
+        return count;
     }
 #endif
 
@@ -1034,16 +1068,32 @@ namespace RT64 {
                 // and wasn't interpolated, or each workload's interpolated frames drew only its own part over the last
                 // state of the workloads before it.
                 std::unique_lock<std::mutex> cursorLock(cursorMutex);
-                cursorCondition.wait(cursorLock, [&]() {
-#               if RT64_GAME_FRAME_WORKLOADS
+#           if RT64_GAME_FRAME_WORKLOADS
+                // Woken by a new workload or a wait, and while a frame is held (endedGameFrame()) by its limit too.
+                while (threadsRunning) {
                     frameWorkloadCount = endedGameFrame(threadCursor);
-#               else
+                    if (frameWorkloadCount > 0) {
+                        break;
+                    }
+
+                    cursorCondition.wait_for(cursorLock, std::chrono::milliseconds(2));
+                }
+#           else
+                cursorCondition.wait(cursorLock, [&]() {
                     frameWorkloadCount = (writeCursor != threadCursor) ? 1 : 0;
-#               endif
                     return (frameWorkloadCount > 0) || !threadsRunning;
                 });
+#           endif
 
                 if (threadsRunning) {
+#               if RT64_GAME_FRAME_WORKLOADS
+                    lastFrameDrawnCount = 0;
+                    for (uint32_t i = 0; i < frameWorkloadCount; i++) {
+                        if (workloads[(threadCursor + i) % workloads.size()].fbPairCount > 0) {
+                            lastFrameDrawnCount++;
+                        }
+                    }
+#               endif
                     processCursor = threadCursor;
                     threadCursor = (threadCursor + frameWorkloadCount) % workloads.size();
                 }
