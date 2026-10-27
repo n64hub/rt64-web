@@ -3,7 +3,6 @@
 //
 
 #include <algorithm>
-#include <cstdio>
 
 #include "common/rt64_math.h"
 
@@ -11,6 +10,8 @@
 #include "rt64_workload_queue.h"
 
 #include "xxHash/xxh3.h"
+
+#include <cstdio>
 
 namespace RT64 {
     // GameFrame
@@ -488,14 +489,6 @@ namespace RT64 {
 #endif
         matchScenes(perspectiveScenes, prevFrame.perspectiveScenes);
         matchScenes(orthographicScenes, prevFrame.orthographicScenes);
-#if RT64_GAME_FRAME_WORKLOADS
-        if (workloadQueue.frameLog) {
-            fprintf(stderr, "MT t=%lld wl=%llu scenes=%u matched=%u transforms=%u far=%u farthest=%.2f\n", WorkloadQueue::logTime(),
-                workloads.empty() ? 0ULL : (unsigned long long)(workloadQueue.workloads[workloads[0]].workloadId), matchLog.scenes,
-                matchLog.scenesMatched, matchLog.transforms, matchLog.farTransforms, matchLog.farthest);
-            fflush(stderr);
-        }
-#endif
 
         if (!workloadsModified.empty()) {
             thread_local std::vector<BufferUploader::Upload> uploads;
@@ -518,6 +511,15 @@ namespace RT64 {
         else {
             velocityUploaderUsed = false;
         }
+
+#if RT64_GAME_FRAME_WORKLOADS
+        if (workloadQueue.frameLog) {
+            fprintf(stderr, "MT t=%lld wl=%llu scenes=%u matched=%u transforms=%u far=%u farthest=%.2f\n", WorkloadQueue::logTime(),
+                workloads.empty() ? 0ULL : (unsigned long long)(workloadQueue.workloads[workloads[0]].workloadId), matchLog.scenes,
+                matchLog.scenesMatched, matchLog.transforms, matchLog.farTransforms, matchLog.farthest);
+            fflush(stderr);
+        }
+#endif
     }
 
     void GameFrame::matchScene(WorkloadQueue &workloadQueue, const GameFrame &prevFrame, const GameScene &curScene, const GameScene &prevScene, std::unordered_map<uint32_t, ModifiedBuffers> &workloadsModified, bool &tileInterpolationUsed, bool &lookAtInterpolationUsed) {
