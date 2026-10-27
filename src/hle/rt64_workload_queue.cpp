@@ -124,7 +124,12 @@ namespace RT64 {
     //   draws to it). Mario Party's board, whose frames are six RSP tasks and whose VI shows its frame now and then
     //   after four of the next one's, about every 0.4 s, drew Toad tiny and an object near him huge between its frames;
     //   the rest of each such frame came 16-18 ms after the wait on an idle host, and up to 260 ms after on a busy one,
-    //   where its board flickered as the characters jumped out of the tube at its start,
+    //   where its board flickered as the characters jumped out of the tube at its start. A frame of offscreen passes
+    //   alone is held the same way, for the workload that draws what the VI shows: Jet Force Gemini's shadow pass, the
+    //   next frame's, is queued before the present that waits for it on a fast host, and ended there as a frame of its
+    //   own it took the interpolated frames' counters from the frame before with one present, and the next frame was
+    //   matched against it: its levels showed no in-between frames, 60 presents a second uncapped where a slower host
+    //   showed 210-350,
     // - where the queue is full, so the game never waits for a frame that can't end (WORKLOAD_QUEUE_SIZE),
     // - and a workload the debugger repeats while paused is a frame of its own, as every workload was before.
     // Workloads that draw nothing are part of the frame they are queued in. Called with cursorMutex held; end says why
@@ -135,6 +140,7 @@ namespace RT64 {
         bool drawsShown = false;
         uint32_t shownFbAddress = 0;
         bool waitedFor = false;
+        bool offscreen = false;
         uint32_t drawnCount = 0;
         for (int c = startCursor; c != writeCursor; c = (c + 1) % queueSize) {
             const Workload &workload = workloads[c];
@@ -153,6 +159,7 @@ namespace RT64 {
                 drawnCount++;
             }
 
+            offscreen = offscreen || workload.offscreenOnly;
             if (workload.drawsShown) {
                 drawsShown = true;
                 shownFbAddress = workload.shownFbAddress;
@@ -184,9 +191,9 @@ namespace RT64 {
             return 0;
         }
 
-        // A frame with fewer workloads that draw than the one before is held for the rest of them, up to HeldFrameLimit or
-        // until the game waits for a free present.
-        if (drawsShown && (drawnCount < lastFrameDrawnCount)) {
+        // A frame with fewer workloads that draw than the one before, or of offscreen passes alone, is held for the rest of
+        // them, up to HeldFrameLimit or until the game waits for a free present.
+        if ((drawsShown && (drawnCount < lastFrameDrawnCount)) || (!drawsShown && offscreen)) {
             const uint64_t firstWorkloadId = workloads[startCursor].workloadId;
             const auto now = std::chrono::steady_clock::now();
             if (heldWorkloadId != firstWorkloadId) {
