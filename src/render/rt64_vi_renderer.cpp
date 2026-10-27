@@ -7,6 +7,8 @@
 #include "shared/rt64_hlsl.h"
 #include "shared/rt64_video_interface.h"
 
+#include <cmath>
+
 namespace RT64 {
     // VIRenderer
 
@@ -118,6 +120,15 @@ namespace RT64 {
         hlslpp::float2 bottomRightScissor = fromSDtoHD({ float(viCropRect.x + viCropRect.z), float(viCropRect.y + viCropRect.w) }, sdSize, hdSize);
         topLeftScissor = fromHDtoWindow(topLeftScissor, hdSize, windowSize);
         bottomRightScissor = fromHDtoWindow(bottomRightScissor, hdSize, windowSize);
+
+#   if defined(__EMSCRIPTEN__)
+        // The viewport's edges on whole pixels. A target rounded up to whole pixels (Auto's 1708x960 for 1706.67x960 at a
+        // 1600x900 canvas) letterboxes the picture by a fraction of a pixel, and Chrome's WebGPU draws no row past the
+        // viewport's last whole one: a viewport from 0.35 to 899.65 left the canvas's last row black, though its centre at
+        // 899.5 is inside. Rounding moves the picture's edges by half a pixel at most.
+        topLeftViewport = { std::round(float(topLeftViewport.x)), std::round(float(topLeftViewport.y)) };
+        bottomRightViewport = { std::round(float(bottomRightViewport.x)), std::round(float(bottomRightViewport.y)) };
+#   endif
 
         viewport = RenderViewport(topLeftViewport.x, topLeftViewport.y, bottomRightViewport.x - topLeftViewport.x, bottomRightViewport.y - topLeftViewport.y);
         scissor = RenderRect(lround(topLeftScissor.x), lround(topLeftScissor.y), lround(bottomRightScissor.x), lround(bottomRightScissor.y));
