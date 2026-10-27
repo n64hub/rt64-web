@@ -444,6 +444,15 @@ namespace RT64 {
         else {
             const uint32_t rowRightPixels = ((rowBytes - rowOffset) / pixelSize) << pixelShift;
             outTile.right = outTile.left + rowRightPixels;
+
+#       if defined(__EMSCRIPTEN__)
+            // A block that ends before its row does holds only the pixels it loaded, so its tile ends there too: one
+            // that ran to the row's end was wider than the row loaded in TMEM, and FramebufferManager::checkRowTileCopy
+            // turns those down. Perfect Dark's IR scanner draws a row crossing its lens as three pieces, each loaded
+            // alone, and the two that end before the row's end each waited for the framebuffer in RAM.
+            const uint32_t loadedPixels = ((addressEnd - addressStart) / pixelSize) << pixelShift;
+            outTile.right = outTile.left + std::min(rowRightPixels, loadedPixels);
+#       endif
         }
 
         // Tile height is defined.
