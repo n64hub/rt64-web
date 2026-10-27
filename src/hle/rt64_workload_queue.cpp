@@ -1294,8 +1294,13 @@ namespace RT64 {
                 auto newerWorkloadQueued = [&]() {
                     std::scoped_lock<std::mutex> cursorLock(cursorMutex);
 #               if RT64_GAME_FRAME_WORKLOADS
-                    // The next frame's first workloads alone (an offscreen pass) aren't a frame: these frames go on.
-                    return endedGameFrame(threadCursor) > 0;
+                    // The next frame's first workloads alone (an offscreen pass) aren't a frame: these frames go on. Not
+                    // while the queue is full, though: the game waits for this frame before it queues another workload or
+                    // the present that shows this one, so no frame can end and a frame's interpolated frames past
+                    // InterpolatedTargetSlots would wait for presents that never come. A frame the queue ended when it
+                    // was full held every workload there was, and Mario Party 2's page stopped for good in its opening,
+                    // uncapped, with 8 of a frame's 12 drawn.
+                    return (endedGameFrame(threadCursor) > 0) || (((writeCursor + 1) % int(workloads.size())) == barrierCursor);
 #               else
                     return (writeCursor != threadCursor);
 #               endif
