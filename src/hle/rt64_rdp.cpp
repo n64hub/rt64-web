@@ -248,8 +248,8 @@ namespace RT64 {
             }
         };
 
-        bool colorOverlap = drawnInto(fbPair.olderColorRect);
-        for (const FixedRect &rect : fbPair.recentColorRects) {
+        bool colorOverlap = drawnInto(fbPair.drawColorRect.older);
+        for (const FixedRect &rect : fbPair.drawColorRect.recent) {
             colorOverlap = colorOverlap || drawnInto(rect);
         }
 
@@ -1221,7 +1221,7 @@ namespace RT64 {
 
             const FixedRect intRect = scissorRect.intersection(drawRect);
             if (!intRect.isNull()) {
-                fbPair.mergeDrawColorRect(intRect);
+                fbPair.drawColorRect.merge(intRect);
                 if (otherMode.zUpd()) {
                     fbPair.drawDepthRect.merge(intRect);
                 }
@@ -1292,7 +1292,7 @@ namespace RT64 {
 
             const FixedRect intRect = scissorRect.intersection(drawRect);
             if (!intRect.isNull()) {
-                fbPair.mergeDrawColorRect(intRect);
+                fbPair.drawColorRect.merge(intRect);
                 if (otherMode.zUpd()) {
                     fbPair.drawDepthRect.merge(intRect);
                 }

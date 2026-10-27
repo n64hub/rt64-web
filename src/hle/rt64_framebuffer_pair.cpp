@@ -7,6 +7,29 @@
 #include "shared/rt64_blender.h"
 
 namespace RT64 {
+#if defined(__EMSCRIPTEN__)
+    // FramebufferPair::DrawnRect
+
+    void FramebufferPair::DrawnRect::merge(const FixedRect &rect) {
+        FixedRect::merge(rect);
+
+        FixedRect &recentRect = recent[recentCursor];
+        if (!recentRect.isNull()) {
+            older.merge(recentRect);
+        }
+
+        recentRect = rect;
+        recentCursor = (recentCursor + 1) % RecentCount;
+    }
+
+    void FramebufferPair::DrawnRect::reset() {
+        FixedRect::reset();
+        recent.fill(FixedRect());
+        recentCursor = 0;
+        older.reset();
+    }
+#endif
+
     // FramebufferPair
 
     void FramebufferPair::reset() {
@@ -29,24 +52,6 @@ namespace RT64 {
         drawColorRect.reset();
         viewportRect.reset();
         drawDepthRect.reset();
-#   if defined(__EMSCRIPTEN__)
-        recentColorRects.fill(FixedRect());
-        recentColorRectCursor = 0;
-        olderColorRect.reset();
-#   endif
-    }
-
-    void FramebufferPair::mergeDrawColorRect(const FixedRect &rect) {
-        drawColorRect.merge(rect);
-#   if defined(__EMSCRIPTEN__)
-        FixedRect &recentRect = recentColorRects[recentColorRectCursor];
-        if (!recentRect.isNull()) {
-            olderColorRect.merge(recentRect);
-        }
-
-        recentRect = rect;
-        recentColorRectCursor = (recentColorRectCursor + 1) % RecentColorRectCount;
-#   endif
     }
 
     void FramebufferPair::addGameCall(const GameCall &gameCall) {

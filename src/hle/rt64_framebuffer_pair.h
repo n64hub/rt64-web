@@ -50,21 +50,29 @@ namespace RT64 {
         std::vector<FramebufferOperation> endFbOperations;
         std::array<uint32_t, 4> ditherPatterns;
         FixedRect scissorRect;
+#   if defined(__EMSCRIPTEN__)
+        // The box of the rects drawn into the color image, which also keeps the newest few apart and the box of the
+        // older ones, so a load ends the pair only if it reads pixels drawn in it (RDP::checkImageOverlap). Its merge()
+        // and reset() hide FixedRect's, so the code that draws merges into it as upstream's does.
+        struct DrawnRect : FixedRect {
+            static constexpr uint32_t RecentCount = 8;
+            std::array<FixedRect, RecentCount> recent;
+            uint32_t recentCursor = 0;
+            FixedRect older;
+
+            void merge(const FixedRect &rect);
+            void reset();
+        };
+
+        DrawnRect drawColorRect;
+#   else
         FixedRect drawColorRect;
+#   endif
         FixedRect viewportRect; // The viewports the pass's triangles were drawn through, each cut to its scissor.
         FixedRect drawDepthRect;
         FlushReason flushReason;
-#   if defined(__EMSCRIPTEN__)
-        // The rects drawn into the color image, the newest few on their own and the box of the older ones, so a load
-        // ends the pair only if it reads pixels drawn in it (RDP::checkImageOverlap). drawColorRect is the box of all.
-        static constexpr uint32_t RecentColorRectCount = 8;
-        std::array<FixedRect, RecentColorRectCount> recentColorRects;
-        uint32_t recentColorRectCursor;
-        FixedRect olderColorRect;
-#   endif
 
         void reset();
-        void mergeDrawColorRect(const FixedRect &rect);
         void addGameCall(const GameCall &gameCall);
         bool inProjection(uint32_t transformsIndex, Projection::Type type) const;
         int changeProjection(uint32_t transformsIndex, Projection::Type type);
