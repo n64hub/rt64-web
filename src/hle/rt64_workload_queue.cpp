@@ -89,7 +89,11 @@ namespace RT64 {
     // game can draw a frame in several workloads, one for each RSP task it ends with a full sync: one for each camera,
     // and empty ones besides, or its shadows' render targets before the frame, as Jet Force Gemini does. A frame is
     // what the workloads up to its present draw, so it ends:
-    // - at a present after one of its workloads that shows the framebuffer it drew to (Workload::shownFbAddress),
+    // - at a present after one of its workloads that shows the framebuffer it drew to (Workload::shownFbAddress), once
+    //   it has as many workloads that draw as the frame before had, or else held as at a wait below: the VI can show a
+    //   frame's framebuffer before the game has drawn all of it. Mario Party's board, whose frames are three or four RSP
+    //   tasks into one framebuffer, presented it after the first now and then, a few times a minute, and the frame ended
+    //   there drew its 3D alone for a frame, without the characters, Toad, the HUD or a text box,
     // - before a workload that starts the next one: an offscreen pass (Workload::offscreenOnly), or one that draws to
     //   another framebuffer the VI shows, as the next frame of a game with two or three does, after one that has drawn,
     // - where something waits for one of its workloads (waitForWorkloadId(): a present whose workload is the next
@@ -132,7 +136,11 @@ namespace RT64 {
             if (drawsShown) {
                 for (const QueuedPresent &present : queuedPresents) {
                     if ((present.workloadId == workload.workloadId) && (present.fbAddress == shownFbAddress)) {
-                        return count;
+                        if (drawnCount >= lastFrameDrawnCount) {
+                            return count;
+                        }
+
+                        waitedFor = true;
                     }
                 }
             }
