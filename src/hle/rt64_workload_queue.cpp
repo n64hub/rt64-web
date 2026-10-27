@@ -91,6 +91,15 @@ namespace RT64 {
         cursorCondition.notify_all();
     }
 
+    // Whether the game's next present waits in PresentQueue::advanceToNextPresent() for the present thread to move on,
+    // as it checks there. Called with cursorMutex held, so the present queue's is taken under this queue's: the present
+    // thread takes none of this queue's under its own but workloadIdMutex, which is held alone everywhere.
+    bool WorkloadQueue::presentQueueFull() const {
+        PresentQueue &presentQueue = *ext.presentQueue;
+        const std::scoped_lock lock(presentQueue.cursorMutex);
+        return ((presentQueue.writeCursor + 1) % int(presentQueue.presents.size())) == presentQueue.barrierCursor;
+    }
+
     // How many of the queued workloads from startCursor on are a game frame that has ended, or 0 while it may go on. A
     // game can draw a frame in several workloads, one for each RSP task it ends with a full sync: one for each camera,
     // and empty ones besides, or its shadows' render targets before the frame, as Jet Force Gemini does. A frame is
@@ -104,14 +113,14 @@ namespace RT64 {
     //   another framebuffer the VI shows, as the next frame of a game with two or three does, after one that has drawn,
     // - where something waits for one of its workloads (waitForWorkloadId(): a present whose workload is the next
     //   frame's offscreen pass, the setup's warm-up, a pause), once it has as many workloads that draw as the frame
-    //   before had, after HeldFrameLimit, or while the game waits for a free present (PresentQueue::writerWaiting),
-    //   as it can't queue the rest then: a present that shows the frame before can come in the middle of the next
-    //   one, and a frame ended there was drawn in two, each part matched against the whole frame before, and its first
-    //   part shown alone (the presentation's SkipBuffering shows a framebuffer as soon as a frame draws to it). Mario
-    //   Party's board, whose frames are six RSP tasks and whose VI shows its frame now and then after four of the next
-    //   one's, about every 0.4 s, drew Toad tiny and an object near him huge between its frames; the rest of each such
-    //   frame came 16-18 ms after the wait on an idle host, and up to 260 ms after on a busy one, where its board
-    //   flickered as the characters jumped out of the tube at its start,
+    //   before had, after HeldFrameLimit, or once the present queue is full (presentQueueFull()), as the game can't
+    //   queue the rest while it waits for a free present: a present that shows the frame before can come in the
+    //   middle of the next one, and a frame ended there was drawn in two, each part matched against the whole frame
+    //   before, and its first part shown alone (the presentation's SkipBuffering shows a framebuffer as soon as a frame
+    //   draws to it). Mario Party's board, whose frames are six RSP tasks and whose VI shows its frame now and then
+    //   after four of the next one's, about every 0.4 s, drew Toad tiny and an object near him huge between its frames;
+    //   the rest of each such frame came 16-18 ms after the wait on an idle host, and up to 260 ms after on a busy one,
+    //   where its board flickered as the characters jumped out of the tube at its start,
     // - where the queue is full, so the game never waits for a frame that can't end (WORKLOAD_QUEUE_SIZE),
     // - and a workload the debugger repeats while paused is a frame of its own, as every workload was before.
     // Workloads that draw nothing are part of the frame they are queued in. Called with cursorMutex held; end says why
@@ -181,7 +190,7 @@ namespace RT64 {
                 heldSince = now;
             }
 
-            if (((now - heldSince) < HeldFrameLimit) && !ext.presentQueue->writerWaiting) {
+            if (((now - heldSince) < HeldFrameLimit) && !presentQueueFull()) {
                 return 0;
             }
 

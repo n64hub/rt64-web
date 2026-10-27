@@ -177,6 +177,7 @@ namespace RT64 {
         void advanceToNextWorkload();
 #   if RT64_GAME_FRAME_WORKLOADS
         void presentQueued(uint64_t presentWorkloadId, uint32_t fbAddress);
+        bool presentQueueFull() const;
         uint32_t endedGameFrame(int startCursor, GameFrameEnd &end) const;
         void logGameFrame(int startCursor, uint32_t count, GameFrameEnd end) const;
         static long long logTime();

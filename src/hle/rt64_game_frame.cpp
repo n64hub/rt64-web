@@ -11,8 +11,6 @@
 
 #include "xxHash/xxh3.h"
 
-#include <cstdio>
-
 namespace RT64 {
     // GameFrame
     
@@ -227,23 +225,6 @@ namespace RT64 {
 
         pairs.resize(uniqueCount);
     }
-
-#if RT64_GAME_FRAME_WORKLOADS
-    // What RT64_FRAME_LOG (WorkloadQueue::frameLog) prints of a frame's matching: its scenes and transforms paired with
-    // the frame before's, and each pair on screen in both whose position there moved further than FarMatchDistance (of
-    // the -1 to 1 screen) between them, which is how a transform paired with another object's reads. Off screen, as
-    // behind the camera, a position's divide by w throws it anywhere.
-    struct MatchLog {
-        uint32_t scenes = 0;
-        uint32_t scenesMatched = 0;
-        uint32_t transforms = 0;
-        uint32_t farTransforms = 0;
-        float farthest = 0.0f;
-    };
-
-    static const float FarMatchDistance = 0.3f;
-    thread_local MatchLog matchLog;
-#endif
 
     struct MatchCandidate {
         uint32_t curIndex = 0;
@@ -474,19 +455,9 @@ namespace RT64 {
                 matchScene(workloadQueue, prevFrame, curScenes[candidate.curIndex], prevScenes[candidate.prevIndex], workloadsModified, tileInterpolationUsed, lookAtInterpolationUsed);
                 curScenesMatched[candidate.curIndex] = true;
                 prevScenesMatched[candidate.prevIndex] = true;
-#if RT64_GAME_FRAME_WORKLOADS
-                matchLog.scenesMatched++;
-#endif
             }
-
-#if RT64_GAME_FRAME_WORKLOADS
-            matchLog.scenes += uint32_t(curScenes.size());
-#endif
         };
 
-#if RT64_GAME_FRAME_WORKLOADS
-        matchLog = MatchLog();
-#endif
         matchScenes(perspectiveScenes, prevFrame.perspectiveScenes);
         matchScenes(orthographicScenes, prevFrame.orthographicScenes);
 
@@ -511,15 +482,6 @@ namespace RT64 {
         else {
             velocityUploaderUsed = false;
         }
-
-#if RT64_GAME_FRAME_WORKLOADS
-        if (workloadQueue.frameLog) {
-            fprintf(stderr, "MT t=%lld wl=%llu scenes=%u matched=%u transforms=%u far=%u farthest=%.2f\n", WorkloadQueue::logTime(),
-                workloads.empty() ? 0ULL : (unsigned long long)(workloadQueue.workloads[workloads[0]].workloadId), matchLog.scenes,
-                matchLog.scenesMatched, matchLog.transforms, matchLog.farTransforms, matchLog.farthest);
-            fflush(stderr);
-        }
-#endif
     }
 
     void GameFrame::matchScene(WorkloadQueue &workloadQueue, const GameFrame &prevFrame, const GameScene &curScene, const GameScene &prevScene, std::unordered_map<uint32_t, ModifiedBuffers> &workloadsModified, bool &tileInterpolationUsed, bool &lookAtInterpolationUsed) {
@@ -824,28 +786,6 @@ namespace RT64 {
             }
 
             matchTransform(firstCurWorkload, firstPrevWorkload, firstCurWorkloadMap, firstPrevWorkloadMap, candidate.curIndex, candidate.prevIndex, modifiedBuffers);
-#if RT64_GAME_FRAME_WORKLOADS
-            if (workloadQueue.frameLog) {
-                const hlslpp::float4x4 &curTransform = firstCurWorkload.drawData.worldTransforms[candidate.curIndex];
-                const hlslpp::float4x4 &prevTransform = firstPrevWorkload.drawData.worldTransforms[candidate.prevIndex];
-                hlslpp::float4 curScreenPos = hlslpp::mul(curTransform[3], firstCurViewProj);
-                hlslpp::float4 prevScreenPos = hlslpp::mul(prevTransform[3], firstPrevViewProj);
-                const bool inFront = (float(curScreenPos.w) > 1e-6f) && (float(prevScreenPos.w) > 1e-6f);
-                curScreenPos = inFront ? (curScreenPos / curScreenPos.w) : curScreenPos;
-                prevScreenPos = inFront ? (prevScreenPos / prevScreenPos.w) : prevScreenPos;
-                const bool onScreen = inFront && (fabsf(float(curScreenPos.x)) <= 1.0f) && (fabsf(float(curScreenPos.y)) <= 1.0f) &&
-                    (fabsf(float(prevScreenPos.x)) <= 1.0f) && (fabsf(float(prevScreenPos.y)) <= 1.0f);
-                const float distance = hlslpp::length(curScreenPos.xy - prevScreenPos.xy);
-                matchLog.transforms++;
-                if (onScreen && (distance > FarMatchDistance)) {
-                    matchLog.farTransforms++;
-                    matchLog.farthest = std::max(matchLog.farthest, distance);
-                    fprintf(stderr, "TM t=%lld wl=%llu cur=%u prev=%u at=%.2f,%.2f from=%.2f,%.2f pos=%.1f diff=%.2f\n", WorkloadQueue::logTime(),
-                        (unsigned long long)(firstCurWorkload.workloadId), candidate.curIndex, candidate.prevIndex, float(curScreenPos.x), float(curScreenPos.y),
-                        float(prevScreenPos.x), float(prevScreenPos.y), float(hlslpp::length(curTransform[3].xyz - prevTransform[3].xyz)), candidate.difference);
-                }
-            }
-#endif
         }
 
         if (!modifiedBuffers.empty()) {
