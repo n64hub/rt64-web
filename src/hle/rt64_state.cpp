@@ -2165,6 +2165,16 @@ namespace RT64 {
                 viHistory.pushVI(newVI, screenFbSize.x);
                 viHistory.pushFactor(lastScreenFactorCounter + 1);
                 lastScreenFactorCounter = 0;
+
+                bool shownBefore = false;
+                for (const ShownFramebuffer &shown : shownFramebuffers) {
+                    shownBefore = shownBefore || ((shown.address == screenFbAddress) && (shown.width == screenFbSize.x) && (shown.siz == screenFbSiz));
+                }
+
+                if (!shownBefore) {
+                    shownFramebuffers[shownFramebufferCursor] = { screenFbAddress, screenFbSize.x, screenFbSiz };
+                    shownFramebufferCursor = (shownFramebufferCursor + 1) % shownFramebuffers.size();
+                }
             }
             else if (viVisible) {
                 lastScreenFactorCounter++;
@@ -2952,23 +2962,30 @@ namespace RT64 {
         workload.debuggerRenderer = debuggerInspector.renderer;
         workload.paused = paused;
 
-        // Whether the workload draws to any framebuffer the VI has shown lately, for a workload a full sync ends. It's
-        // worked out here, not where fullSync() ends, which the games' own patches of RT64 add to.
+        // Whether the workload draws to any framebuffer the VI has shown (shownFramebuffers), for a workload a full sync
+        // ends. It's worked out here, not where fullSync() ends, which the games' own patches of RT64 add to. A workload
+        // that draws nothing is no offscreen pass even where it sets a color image, as a game's RSP task that draws
+        // nothing does in the middle of its frame.
         if (!paused) {
             bool viShowsAny = false;
+            bool drawsAny = false;
             uint32_t lastShownPair = 0;
             workload.drawsShown = false;
             workload.shownFbAddress = 0;
-            for (const VIHistory::Present &entry : viHistory.history) {
-                if (!entry.vi.visible()) {
+            for (uint32_t f = 0; f < workload.fbPairCount; f++) {
+                drawsAny = drawsAny || !workload.fbPairs[f].drawColorRect.isEmpty();
+            }
+
+            for (const ShownFramebuffer &shown : shownFramebuffers) {
+                if (shown.address == 0) {
                     continue;
                 }
 
                 viShowsAny = true;
                 for (uint32_t f = 0; f < workload.fbPairCount; f++) {
                     const FramebufferPair &fbPair = workload.fbPairs[f];
-                    const bool drawsEntry = !fbPair.drawColorRect.isEmpty() && (fbPair.colorImage.address == entry.vi.fbAddress()) &&
-                        (fbPair.colorImage.width == entry.vi.fbSize().x) && (fbPair.colorImage.siz == entry.vi.fbSiz());
+                    const bool drawsEntry = !fbPair.drawColorRect.isEmpty() && (fbPair.colorImage.address == shown.address) &&
+                        (fbPair.colorImage.width == shown.width) && (fbPair.colorImage.siz == shown.siz);
 
                     // The last of the shown framebuffers it draws to.
                     if (drawsEntry && (!workload.drawsShown || (f >= lastShownPair))) {
@@ -2979,7 +2996,7 @@ namespace RT64 {
                 }
             }
 
-            workload.offscreenOnly = viShowsAny && (workload.fbPairCount > 0) && !workload.drawsShown;
+            workload.offscreenOnly = viShowsAny && drawsAny && !workload.drawsShown;
         }
     }
 

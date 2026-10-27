@@ -27,11 +27,13 @@
 // A game frame of several workloads is drawn once it has ended, and the one before it stays out of the writer's reach
 // until then (WorkloadQueue::renderThreadLoop): the queue holds the frame before, the frame and the game's next one.
 // A game can draw a frame in several, as Jet Force Gemini draws each of its frames in two (its shadows, then the
-// frame). A frame that doesn't fit ends where the queue is full, as each workload was a frame of its own
-// before, and with too few for the next one too the game waits for every
-// interpolated frame to be presented: its frames take longer, its rate falls and the interpolated frames grow, down to
-// a rate of one or two a second and a color target for each of hundreds of display frames.
-#   define WORKLOAD_QUEUE_SIZE 16
+// frame) and Mario Party in up to a dozen (an RSP task for each microcode it draws with, and empty ones). A frame that
+// doesn't fit ends where the queue is full and is drawn in parts, the frames between the game's showing the first part
+// alone: with 16, Mario Party's board flickered without its characters, HUD and text now and then. With too few for
+// the next one too the game waits for every interpolated frame to be presented: its frames take longer, its rate falls
+// and the interpolated frames grow, down to a rate of one or two a second and a color target for each of hundreds of
+// display frames.
+#   define WORKLOAD_QUEUE_SIZE 32
 #else
 #   define WORKLOAD_QUEUE_SIZE 4
 #endif
