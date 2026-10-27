@@ -1196,7 +1196,7 @@ namespace RT64 {
             const FixedRect viewportClipRect = viewport.rect(clipRatios.data());
             drawRect = viewportClipRect.intersection(scissorRect.intersection(drawRect));
             if (!drawRect.isNull()) {
-                fbPair.drawColorRect.merge(drawRect);
+                fbPair.mergeDrawColorRect(drawRect);
                 if (otherModeStack[otherModeStackSize - 1].zUpd()) {
                     fbPair.drawDepthRect.merge(drawRect);
                 }

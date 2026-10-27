@@ -200,7 +200,63 @@ namespace RT64 {
         const uint32_t colorStart = fbPair.colorImage.address + colorRowStart * colorBpr;
         const uint32_t colorEnd = colorStart + (colorRowEnd - colorRowStart) * colorBpr;
         bool overlapDetected = false;
+#   if defined(__EMSCRIPTEN__)
+        // A load ends the pair only if it reads pixels drawn in it, not any in the rows of the box of its draws. A tile
+        // copy is made at the pair's start and a load from RAM reads what the pairs before it wrote back, so either
+        // misses only the pair's own draws. Perfect Dark's IR scanner draws each row crossing its lens as three pieces,
+        // each loaded from that row after the piece before it was drawn there, and the box made each piece but the
+        // first end a pair: 123 a game frame against 4 with the scanner off.
+        auto drawnInto = [&](const FixedRect &rect) {
+            if (rect.isEmpty()) {
+                return false;
+            }
+
+            const int64_t rowStart = std::max(rect.top(false), 0);
+            const int64_t rowEnd = rect.bottom(true);
+            const int64_t rectLeft = int64_t(std::max(rect.left(false), 0)) << fbPair.colorImage.siz >> 1;
+            const int64_t rectRight = int64_t(std::min(rect.right(true), int32_t(imageWidth))) << fbPair.colorImage.siz >> 1;
+            const int64_t loadStart = int64_t(addressStart) - fbPair.colorImage.address;
+            const int64_t loadEnd = int64_t(addressEnd) - fbPair.colorImage.address;
+            if ((colorBpr == 0) || (rowStart >= rowEnd) || (rectLeft >= rectRight) || (loadEnd <= loadStart) || (loadEnd <= 0)) {
+                return false;
+            }
+
+            // The rows the load reads from, with the bytes it starts at in its first and ends at in its last.
+            int64_t firstRow = std::max(loadStart, int64_t(0)) / colorBpr;
+            int64_t firstByte = std::max(loadStart, int64_t(0)) % colorBpr;
+            int64_t lastRow = (loadEnd - 1) / colorBpr;
+            int64_t lastByte = (loadEnd - 1) % colorBpr + 1;
+            if ((lastRow < rowStart) || (firstRow >= rowEnd)) {
+                return false;
+            }
+
+            if (firstRow < rowStart) {
+                firstRow = rowStart;
+                firstByte = 0;
+            }
+
+            if (lastRow >= rowEnd) {
+                lastRow = rowEnd - 1;
+                lastByte = colorBpr;
+            }
+
+            if (firstRow == lastRow) {
+                return (firstByte < rectRight) && (lastByte > rectLeft);
+            }
+            else {
+                return (lastRow - firstRow > 1) || (firstByte < rectRight) || (lastByte > rectLeft);
+            }
+        };
+
+        bool colorOverlap = drawnInto(fbPair.olderColorRect);
+        for (const FixedRect &rect : fbPair.recentColorRects) {
+            colorOverlap = colorOverlap || drawnInto(rect);
+        }
+
+        if (colorOverlap) {
+#   else
         if ((addressStart < colorEnd) && (addressEnd > colorStart)) {
+#   endif
             colorImage.changed = true;
             overlapDetected = true;
         }
@@ -1165,7 +1221,7 @@ namespace RT64 {
 
             const FixedRect intRect = scissorRect.intersection(drawRect);
             if (!intRect.isNull()) {
-                fbPair.drawColorRect.merge(intRect);
+                fbPair.mergeDrawColorRect(intRect);
                 if (otherMode.zUpd()) {
                     fbPair.drawDepthRect.merge(intRect);
                 }
@@ -1236,7 +1292,7 @@ namespace RT64 {
 
             const FixedRect intRect = scissorRect.intersection(drawRect);
             if (!intRect.isNull()) {
-                fbPair.drawColorRect.merge(intRect);
+                fbPair.mergeDrawColorRect(intRect);
                 if (otherMode.zUpd()) {
                     fbPair.drawDepthRect.merge(intRect);
                 }

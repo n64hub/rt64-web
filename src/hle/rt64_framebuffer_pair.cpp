@@ -29,6 +29,24 @@ namespace RT64 {
         drawColorRect.reset();
         viewportRect.reset();
         drawDepthRect.reset();
+#   if defined(__EMSCRIPTEN__)
+        recentColorRects.fill(FixedRect());
+        recentColorRectCursor = 0;
+        olderColorRect.reset();
+#   endif
+    }
+
+    void FramebufferPair::mergeDrawColorRect(const FixedRect &rect) {
+        drawColorRect.merge(rect);
+#   if defined(__EMSCRIPTEN__)
+        FixedRect &recentRect = recentColorRects[recentColorRectCursor];
+        if (!recentRect.isNull()) {
+            olderColorRect.merge(recentRect);
+        }
+
+        recentRect = rect;
+        recentColorRectCursor = (recentColorRectCursor + 1) % RecentColorRectCount;
+#   endif
     }
 
     void FramebufferPair::addGameCall(const GameCall &gameCall) {
