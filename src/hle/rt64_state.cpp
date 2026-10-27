@@ -2236,6 +2236,11 @@ namespace RT64 {
             present.screenVI = newVI;
             advancePresent(present, false);
             ext.presentQueue->advanceToNextPresent();
+#       if RT64_GAME_FRAME_WORKLOADS
+            if (newVI.visible()) {
+                ext.workloadQueue->presentQueued(present.workloadId, screenFbAddress);
+            }
+#       endif
 
             // This presentation originates from screen changes being made manually by the CPU
             // or the game somehow not doing some form of buffering (instant input romhacks).
@@ -2951,21 +2956,30 @@ namespace RT64 {
         // worked out here, not where fullSync() ends, which the games' own patches of RT64 add to.
         if (!paused) {
             bool viShowsAny = false;
-            bool drawsShown = false;
+            uint32_t lastShownPair = 0;
+            workload.drawsShown = false;
+            workload.shownFbAddress = 0;
             for (const VIHistory::Present &entry : viHistory.history) {
                 if (!entry.vi.visible()) {
                     continue;
                 }
 
                 viShowsAny = true;
-                for (uint32_t f = 0; (f < workload.fbPairCount) && !drawsShown; f++) {
+                for (uint32_t f = 0; f < workload.fbPairCount; f++) {
                     const FramebufferPair &fbPair = workload.fbPairs[f];
-                    drawsShown = !fbPair.drawColorRect.isEmpty() && (fbPair.colorImage.address == entry.vi.fbAddress()) &&
+                    const bool drawsEntry = !fbPair.drawColorRect.isEmpty() && (fbPair.colorImage.address == entry.vi.fbAddress()) &&
                         (fbPair.colorImage.width == entry.vi.fbSize().x) && (fbPair.colorImage.siz == entry.vi.fbSiz());
+
+                    // The last of the shown framebuffers it draws to.
+                    if (drawsEntry && (!workload.drawsShown || (f >= lastShownPair))) {
+                        workload.drawsShown = true;
+                        workload.shownFbAddress = fbPair.colorImage.address;
+                        lastShownPair = f;
+                    }
                 }
             }
 
-            workload.offscreenOnly = viShowsAny && (workload.fbPairCount > 0) && !drawsShown;
+            workload.offscreenOnly = viShowsAny && (workload.fbPairCount > 0) && !workload.drawsShown;
         }
     }
 

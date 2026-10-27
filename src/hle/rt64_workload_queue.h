@@ -23,13 +23,15 @@
 #   include "render/rt64_raytracing_shader_cache.h"
 #endif
 
-#if RT64_OFFSCREEN_WORKLOADS
-// Two more than upstream's: while a frame after an offscreen pass is drawn, the frame before the pass stays out of the
-// writer's reach too (WorkloadQueue::renderThreadLoop), and the game must still be able to queue its next pass and its
-// next frame, which is what ends the frame's interpolated frames. With four it could queue nothing, and waited for every
-// interpolated frame to be presented: its frames took longer, its rate fell and the interpolated frames grew, down to
+#if RT64_GAME_FRAME_WORKLOADS
+// A game frame of several workloads is drawn once it has ended, and the one before it stays out of the writer's reach
+// until then (WorkloadQueue::renderThreadLoop): the queue holds the frame before, the frame and the game's next one.
+// A game can draw a frame in several, as Jet Force Gemini draws each of its frames in two (its shadows, then the
+// frame). A frame that doesn't fit ends where the queue is full, as each workload was a frame of its own
+// before, and with too few for the next one too the game waits for every
+// interpolated frame to be presented: its frames take longer, its rate falls and the interpolated frames grow, down to
 // a rate of one or two a second and a color target for each of hundreds of display frames.
-#   define WORKLOAD_QUEUE_SIZE 6
+#   define WORKLOAD_QUEUE_SIZE 16
 #else
 #   define WORKLOAD_QUEUE_SIZE 4
 #endif
@@ -84,6 +86,18 @@ namespace RT64 {
         std::condition_variable cursorCondition;
         uint64_t workloadId;
         uint64_t lastPresentId;
+#   if RT64_GAME_FRAME_WORKLOADS
+        // The last presents the game queued, the workload before each and the framebuffer it shows, and the newest
+        // workload something waits for (waitForWorkloadId()): where a game frame ends (endedGameFrame()).
+        struct QueuedPresent {
+            uint64_t workloadId = 0;
+            uint32_t fbAddress = 0;
+        };
+
+        std::array<QueuedPresent, 8> queuedPresents;
+        uint32_t queuedPresentCursor = 0;
+        uint64_t waitedWorkloadId = 0;
+#   endif
         std::mutex workloadIdMutex;
         std::condition_variable workloadIdCondition;
         std::thread *renderThread = nullptr;
@@ -129,6 +143,10 @@ namespace RT64 {
         ~WorkloadQueue();
         void reset();
         void advanceToNextWorkload();
+#   if RT64_GAME_FRAME_WORKLOADS
+        void presentQueued(uint64_t presentWorkloadId, uint32_t fbAddress);
+        uint32_t endedGameFrame(int startCursor) const;
+#   endif
         void repeatLastWorkload();
         uint32_t previousWriteCursor() const;
         void waitForIdle();
@@ -139,7 +157,7 @@ namespace RT64 {
         void threadConfigurationValidate();
         void threadRenderFrame(GameFrame &curFrame, const GameFrame &prevFrame, const WorkloadConfiguration &workloadConfig,
             const DebuggerRenderer &debuggerRenderer, const DebuggerCamera &debuggerCamera, float curFrameWeight, float prevFrameWeight,
-            float deltaTimeMs, RenderTargetKey overrideTargetKey, int32_t overrideTargetFbPairIndex, RenderTarget *overrideTarget,
+            float deltaTimeMs, RenderTargetKey overrideTargetKey, uint32_t overrideTargetWorkload, int32_t overrideTargetFbPairIndex, RenderTarget *overrideTarget,
             uint32_t overrideTargetModifier, bool uploadVelocity, bool uploadExtras, bool interpolateTiles, bool interpolateLookAts);
 
         void threadAdvanceBarrier();
