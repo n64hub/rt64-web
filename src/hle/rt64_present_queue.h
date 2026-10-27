@@ -46,6 +46,11 @@ namespace RT64 {
         std::thread *presentThread = nullptr;
         std::mutex threadMutex;
         std::atomic<bool> presentThreadRunning = false;
+#if RT64_GAME_FRAME_WORKLOADS
+        // Set while the game's thread waits in advanceToNextPresent() for a present to be free: a game frame held for
+        // the rest of its workloads (WorkloadQueue::endedGameFrame()) ends then, as the game can't queue them.
+        std::atomic<bool> writerWaiting = false;
+#endif
         std::recursive_mutex inspectorMutex;
         std::mutex screenFbChangePoolMutex;
         Framebuffer scratchFb;

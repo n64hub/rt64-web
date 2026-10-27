@@ -53,6 +53,9 @@ namespace RT64 {
         do {
             const std::scoped_lock lock(cursorMutex);
             waitForBarrier = (nextWriteCursor == barrierCursor);
+#if RT64_GAME_FRAME_WORKLOADS
+            writerWaiting = waitForBarrier;
+#endif
         } while (waitForBarrier);
 
         // Modify the cursor and notify anything waiting on the queue.

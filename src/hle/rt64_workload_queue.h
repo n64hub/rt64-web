@@ -44,8 +44,20 @@ namespace RT64 {
 
 #if RT64_GAME_FRAME_WORKLOADS
     // How long a game frame with fewer workloads that draw than the one before is held back from ending at a wait
-    // (WorkloadQueue::endedGameFrame()): two VIs at 60 Hz, which the present waiting for it is delayed by at most.
-    constexpr std::chrono::milliseconds HeldFrameLimit(34);
+    // (WorkloadQueue::endedGameFrame()), at most. A held frame ends at its own present or the next frame's start, so
+    // this bounds only one with neither, the last before a game stops drawing: the rest of a frame comes when the
+    // game's threads get to it, and on a busy host Mario Party's came up to 260 ms after a present began to wait.
+    constexpr std::chrono::milliseconds HeldFrameLimit(300);
+
+    // Why a game frame ended (WorkloadQueue::endedGameFrame()), as RT64_FRAME_LOG prints it.
+    enum class GameFrameEnd {
+        Present,
+        NextFrame,
+        Wait,
+        HeldLimit,
+        QueueFull,
+        Paused
+    };
 #endif
 
 #if defined(__EMSCRIPTEN__)
@@ -112,6 +124,11 @@ namespace RT64 {
         uint32_t lastFrameDrawnCount = 0;
         mutable uint64_t heldWorkloadId = 0;
         mutable std::chrono::steady_clock::time_point heldSince;
+
+        // With the environment variable RT64_FRAME_LOG set, each game frame is printed to stderr as it ends
+        // (logGameFrame()), and each present the game queues and each wait for a workload as they come: to tell a frame
+        // drawn in parts from a frame matched wrongly against the one before.
+        bool frameLog = false;
 #   endif
         std::mutex workloadIdMutex;
         std::condition_variable workloadIdCondition;
@@ -160,7 +177,9 @@ namespace RT64 {
         void advanceToNextWorkload();
 #   if RT64_GAME_FRAME_WORKLOADS
         void presentQueued(uint64_t presentWorkloadId, uint32_t fbAddress);
-        uint32_t endedGameFrame(int startCursor) const;
+        uint32_t endedGameFrame(int startCursor, GameFrameEnd &end) const;
+        void logGameFrame(int startCursor, uint32_t count, GameFrameEnd end) const;
+        static long long logTime();
 #   endif
         void repeatLastWorkload();
         uint32_t previousWriteCursor() const;
