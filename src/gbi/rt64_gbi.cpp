@@ -258,7 +258,7 @@ namespace RT64 {
             GBISegment{ 0x10B0,     0xE8028E4BC6529E6EULL,  { &ZSORTP_0_33 } }, // Needs confirmation.
     };
 
-    static std::array<GBISegment, 106> dataSegments = {
+    static std::array<GBISegment, 105> dataSegments = {
             GBISegment{ 0x800,      0xEEB10D73400213B3ULL,  { &F3D_SDK_E } }, // Needs confirmation.
             GBISegment{ 0x800,      0x49651E384B48F694ULL,  { &F3D_SDK_F } }, // Needs confirmation.
             GBISegment{ 0x800,      0x1A736198F90E81C5ULL,  { &F3D_SDK_UNKNOWN_G } }, // Needs confirmation.
@@ -361,10 +361,16 @@ namespace RT64 {
             GBISegment{ 0x800,      0x880EF9B9011CB11EULL,  { &L3DEX_1_23 } }, // Needs confirmation.
             GBISegment{ 0x800,      0x67315143B3DE852EULL,  { &L3DEX_1_23_A } }, // Needs confirmation.
             GBISegment{ 0x3F0,      0x58F659DEBA493C69ULL,  { &L3DEX2_FIFO_2_05 } }, // Needs confirmation.
-            GBISegment{ 0x3F0,      0x56A837AB6D5BB446ULL,  { &L3DEX2_FIFO_2_06 } },
             GBISegment{ 0x3F0,      0x772E4F4BD7F82DEFULL,  { &L3DEX2_FIFO_ACCLAIM } }, // Needs confirmation.
             GBISegment{ 0x3F0,      0xE261C98A63863DB4ULL,  { &L3DEX2_FIFO_2_08 } }, // Needs confirmation.
             GBISegment{ 0x400,      0x8F5D64011662220CULL,  { &ZSORTP_0_33 } }, // Needs confirmation.
+    };
+
+    // Data segments added apart from dataSegments, so that a game's own rt64 change that adds to that array, and so
+    // changes its count, still applies over this file (CBFD-Recompiled-web's, JetForceGemini-Recomp-web's). They are
+    // hashed after it, from the segment's start again.
+    static std::array<GBISegment, 1> moreDataSegments = {
+            GBISegment{ 0x3F0,      0x56A837AB6D5BB446ULL,  { &L3DEX2_FIFO_2_06 } },
     };
 
     static bool textAndDataSegmentsSorted = false;
@@ -377,6 +383,7 @@ namespace RT64 {
         if (!textAndDataSegmentsSorted) {
             std::sort(textSegments.begin(), textSegments.end());
             std::sort(dataSegments.begin(), dataSegments.end());
+            std::sort(moreDataSegments.begin(), moreDataSegments.end());
             textAndDataSegmentsSorted = true;
         }
     }
@@ -437,6 +444,15 @@ namespace RT64 {
             hashSegment(i, dataSegments[i], dataSegmentIndex);
         }
 
+        // An index past dataSegments' is one of moreDataSegments.
+        XXH3_64bits_reset(&xxh3);
+        rdramCursor = &RDRAM[dataAddress];
+        rdramHashed = 0;
+        rdramHash = 0;
+        for (uint32_t i = 0; i < moreDataSegments.size(); i++) {
+            hashSegment(uint32_t(dataSegments.size()) + i, moreDataSegments[i], dataSegmentIndex);
+        }
+
         if (textSegmentIndex < 0 || dataSegmentIndex < 0) {
             fprintf(stderr, "Unable to find a matching GBI in the current database. This game is not supported in HLE.\n");
             deduceGBIInformation(RDRAM, textAddress, dataAddress);
@@ -445,7 +461,8 @@ namespace RT64 {
 
         // Search for the first intersection available between both segments.
         const GBISegment &textSegment = textSegments[textSegmentIndex];
-        const GBISegment &dataSegment = dataSegments[dataSegmentIndex];
+        const GBISegment &dataSegment = (uint32_t(dataSegmentIndex) < dataSegments.size()) ? dataSegments[dataSegmentIndex] :
+            moreDataSegments[dataSegmentIndex - dataSegments.size()];
         const GBIInstance *matchingInstance = nullptr;
         for (const GBIInstance *textInstance : textSegment.instances) {
             for (const GBIInstance *dataInstance : dataSegment.instances) {
