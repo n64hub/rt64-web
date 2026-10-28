@@ -1369,6 +1369,9 @@ namespace RT64 {
                 InterpolatedFrameCounters &prevFrameCounters = ext.sharedResources->interpolatedFrames[ext.sharedResources->interpolatedFramesIndex];
                 const bool useDifferentCounters = (lastPresentId != workload.presentId);
                 if (useDifferentCounters) {
+#               if RT64_GAME_FRAME_WORKLOADS
+                    std::scoped_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
+#               endif
                     ext.sharedResources->interpolatedFramesIndex = ext.sharedResources->interpolatedFramesIndex ^ 1;
                     lastPresentId = workload.presentId;
                 }
@@ -1382,10 +1385,20 @@ namespace RT64 {
                 }
 
                 InterpolatedFrameCounters &curFrameCounters = ext.sharedResources->interpolatedFrames[ext.sharedResources->interpolatedFramesIndex];
+#           if RT64_GAME_FRAME_WORKLOADS
+                // Not while a present holds them (InterpolatedFrameCounters::inUse): the frame it shows has ended, so it does.
+                std::unique_lock<std::mutex> curInterpolatedLock(ext.sharedResources->interpolatedMutex);
+                ext.sharedResources->interpolatedCondition.wait(curInterpolatedLock, [&]() {
+                    return !curFrameCounters.inUse || !threadsRunning;
+                });
+#           endif
                 curFrameCounters.skipped = false;
                 curFrameCounters.presented = 0;
                 curFrameCounters.available = 0;
                 curFrameCounters.count = displayFrames;
+#           if RT64_GAME_FRAME_WORKLOADS
+                curInterpolatedLock.unlock();
+#           endif
 
                 // Create as many render targets as required to store the interpolated targets.
                 auto &interpolatedTargets = ext.sharedResources->interpolatedColorTargets;
@@ -1493,7 +1506,12 @@ namespace RT64 {
                                 std::unique_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
                                 ext.sharedResources->interpolatedCondition.wait(interpolatedLock, [&]() {
                                     frameReduction = frameReduction || (prevFrameCounters.presented <= prevTargetIndex);
+#                               if RT64_GAME_FRAME_WORKLOADS
+                                    // Only while a present holds them (InterpolatedFrameCounters::inUse).
+                                    return (prevFrameCounters.presented > prevTargetIndex) || !prevFrameCounters.inUse;
+#                               else
                                     return prevFrameCounters.presented > prevTargetIndex;
+#                               endif
                                 });
                             }
 

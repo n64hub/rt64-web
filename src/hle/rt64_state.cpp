@@ -3012,13 +3012,13 @@ namespace RT64 {
         present.presentId = ++presentId;
         present.workloadId = workloadId;
         present.paused = paused;
+        present.drawnWorkloadId = workloadId;
 #   if RT64_GAME_FRAME_WORKLOADS
         // A present waits for the last workload that drew the framebuffer it shows, not for the newest one queued, which
         // can be the next frame's first: a game that queues its present after starting the next frame, as Mario Party's
         // minigames do, had the present wait for that frame's workloads too, which ended it there at a wait in the
         // middle (WorkloadQueue::endedGameFrame()), its rest drawn as a frame of its own, or held it and the game with
         // it. A framebuffer no workload has drawn since the VI first showed it waits for the newest, as before.
-        present.drawnWorkloadId = workloadId;
         const uint32_t screenFbAddress = present.screenVI.fbAddress();
         const uint32_t screenFbWidth = present.screenVI.fbSize().x;
         const uint8_t screenFbSiz = present.screenVI.fbSiz();

@@ -142,7 +142,16 @@ namespace RT64 {
         RenderTarget *colorTarget = nullptr;
         int32_t framesToPresent = 1;
         bool lockedWorkloadMutex = false;
+#   if RT64_GAME_FRAME_WORKLOADS
+        // The counters are taken under the lock the workload thread switches them under, and held until this present ends
+        // (InterpolatedFrameCounters::inUse).
+        ext.sharedResources->interpolatedMutex.lock();
+#   endif
         InterpolatedFrameCounters &frameCounters = ext.sharedResources->interpolatedFrames[ext.sharedResources->interpolatedFramesIndex];
+#   if RT64_GAME_FRAME_WORKLOADS
+        frameCounters.inUse = true;
+        ext.sharedResources->interpolatedMutex.unlock();
+#   endif
 
         // TODO: There's a possible race condition interactions that can happen while the workload
         // queue is rendering extra frames and the present event is processed while it's generating
@@ -470,6 +479,15 @@ namespace RT64 {
                 presentProfiler.logAndRestart();
             }
         }
+
+#   if RT64_GAME_FRAME_WORKLOADS
+        {
+            std::scoped_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
+            frameCounters.inUse = false;
+        }
+
+        ext.sharedResources->interpolatedCondition.notify_all();
+#   endif
     }
 
     void PresentQueue::skipInterpolation() {
@@ -785,11 +803,7 @@ namespace RT64 {
                 Present &present = presents[processCursor];
                 {
                     PhaseTimer phaseTimer(this, PhaseWorkload);
-#               if RT64_GAME_FRAME_WORKLOADS
                     ext.workloadQueue->waitForWorkloadId(present.drawnWorkloadId);
-#               else
-                    ext.workloadQueue->waitForWorkloadId(present.workloadId);
-#               endif
                 }
 
                 if (!presentThreadRunning) {

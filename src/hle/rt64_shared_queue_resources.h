@@ -23,6 +23,16 @@ namespace RT64 {
         uint32_t available = 0;
         uint32_t count = 0;
         bool skipped = false;
+#   if RT64_GAME_FRAME_WORKLOADS
+        // Whether a present is showing these counters' targets (PresentQueue::threadPresent()). A present waits for the
+        // last workload that drew what it shows (State::advancePresent()), not the newest, so it can start after the next
+        // frame switched to the other counters and take those, and no present ever shows these; or it can still hold
+        // its counters two frames on, the workload thread going on as soon as a present has shown its first frame. So a
+        // frame switching away waits for the set before to be shown only while a present holds it, and a frame starts
+        // on a set only once no present holds it: the frame that present shows has ended, so it does. Each waited for
+        // good before, Mario Party 2's page 3 s into its boot, its present waiting for frames of a set reset under it.
+        bool inUse = false;
+#   endif
     };
 
     struct SharedQueueResources {

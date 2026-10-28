@@ -23,9 +23,8 @@ namespace RT64 {
         bool paused = false;
         uint64_t presentId = 0;
         uint64_t workloadId = 0;
-#   if RT64_GAME_FRAME_WORKLOADS
-        // The workload the present thread waits for: the last that drew the framebuffer it shows (State::advancePresent()).
+        // The workload the present thread waits for: with RT64_GAME_FRAME_WORKLOADS the last that drew the framebuffer it
+        // shows, or else workloadId (State::advancePresent()).
         uint64_t drawnWorkloadId = 0;
-#   endif
     };
 };
