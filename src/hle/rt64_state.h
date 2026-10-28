@@ -143,10 +143,12 @@ namespace RT64 {
 
         // The last different framebuffers the VI has shown, for which a workload draws to (advanceWorkload()):
         // viHistory keeps the last three VIs, and a game with three framebuffers can show its third only now and then.
+        // workloadId is the last workload that drew to it, which a present of it waits for (advancePresent()).
         struct ShownFramebuffer {
             uint32_t address = 0;
             uint32_t width = 0;
             uint8_t siz = 0;
+            uint64_t workloadId = 0;
         };
 
         std::array<ShownFramebuffer, 8> shownFramebuffers = {};

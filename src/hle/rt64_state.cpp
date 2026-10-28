@@ -2980,7 +2980,7 @@ namespace RT64 {
                 drawsAny = drawsAny || !workload.fbPairs[f].drawColorRect.isEmpty();
             }
 
-            for (const ShownFramebuffer &shown : shownFramebuffers) {
+            for (ShownFramebuffer &shown : shownFramebuffers) {
                 if (shown.address == 0) {
                     continue;
                 }
@@ -2990,6 +2990,10 @@ namespace RT64 {
                     const FramebufferPair &fbPair = workload.fbPairs[f];
                     const bool drawsEntry = !fbPair.drawColorRect.isEmpty() && (fbPair.colorImage.address == shown.address) &&
                         (fbPair.colorImage.width == shown.width) && (fbPair.colorImage.siz == shown.siz);
+
+                    if (drawsEntry) {
+                        shown.workloadId = workload.workloadId;
+                    }
 
                     // The last of the shown framebuffers it draws to.
                     if (drawsEntry && (!workload.drawsShown || (f >= lastShownPair))) {
@@ -3008,6 +3012,22 @@ namespace RT64 {
         present.presentId = ++presentId;
         present.workloadId = workloadId;
         present.paused = paused;
+#   if RT64_GAME_FRAME_WORKLOADS
+        // A present waits for the last workload that drew the framebuffer it shows, not for the newest one queued, which
+        // can be the next frame's first: a game that queues its present after starting the next frame, as Mario Party's
+        // minigames do, had the present wait for that frame's workloads too, which ended it there at a wait in the
+        // middle (WorkloadQueue::endedGameFrame()), its rest drawn as a frame of its own, or held it and the game with
+        // it. A framebuffer no workload has drawn since the VI first showed it waits for the newest, as before.
+        present.drawnWorkloadId = workloadId;
+        const uint32_t screenFbAddress = present.screenVI.fbAddress();
+        const uint32_t screenFbWidth = present.screenVI.fbSize().x;
+        const uint8_t screenFbSiz = present.screenVI.fbSiz();
+        for (const ShownFramebuffer &shown : shownFramebuffers) {
+            if ((shown.workloadId != 0) && (shown.address == screenFbAddress) && (shown.width == screenFbWidth) && (shown.siz == screenFbSiz)) {
+                present.drawnWorkloadId = std::min(present.drawnWorkloadId, shown.workloadId);
+            }
+        }
+#   endif
         present.debuggerFramebuffer.address = debuggerInspector.renderer.framebufferAddress;
         present.debuggerFramebuffer.view = (debuggerInspector.renderer.framebufferIndex >= 0);
     }

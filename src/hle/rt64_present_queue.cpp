@@ -785,7 +785,11 @@ namespace RT64 {
                 Present &present = presents[processCursor];
                 {
                     PhaseTimer phaseTimer(this, PhaseWorkload);
+#               if RT64_GAME_FRAME_WORKLOADS
+                    ext.workloadQueue->waitForWorkloadId(present.drawnWorkloadId);
+#               else
                     ext.workloadQueue->waitForWorkloadId(present.workloadId);
+#               endif
                 }
 
                 if (!presentThreadRunning) {
@@ -800,7 +804,7 @@ namespace RT64 {
                 // frames a second showing none, for good. Workloads end in order, so the next one is the one to look at.
                 {
                     const std::scoped_lock cursorLock(cursorMutex);
-                    newerQueued = (writeCursor != threadCursor) && ext.workloadQueue->isWorkloadDone(presents[threadCursor].workloadId);
+                    newerQueued = (writeCursor != threadCursor) && ext.workloadQueue->isWorkloadDone(presents[threadCursor].drawnWorkloadId);
                 }
 
                 skipPresent = skipPresent || newerQueued;
