@@ -2245,8 +2245,12 @@ namespace RT64 {
             // Push a new renderer event to the timeline for presenting this VI.
             present.screenVI = newVI;
             advancePresent(present, false);
+#       if RT64_GAME_FRAME_WORKLOADS
+            ext.workloadQueue->presentAdvancing = true;
+#       endif
             ext.presentQueue->advanceToNextPresent();
 #       if RT64_GAME_FRAME_WORKLOADS
+            ext.workloadQueue->presentAdvancing = false;
             if (newVI.visible()) {
                 ext.workloadQueue->presentQueued(present.workloadId, screenFbAddress);
             }

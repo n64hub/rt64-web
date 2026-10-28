@@ -125,6 +125,10 @@ namespace RT64 {
         mutable uint64_t heldWorkloadId = 0;
         mutable std::chrono::steady_clock::time_point heldSince;
 
+        // Whether the game is in PresentQueue::advanceToNextPresent() (State::updateScreen()), where it waits while the
+        // present queue is full (presentWaiting()).
+        std::atomic<bool> presentAdvancing = false;
+
         // With the environment variable RT64_FRAME_LOG set (a page: opened with ?frame-log), each game frame is printed to
         // stderr as it ends (logGameFrame()), and each present the game queues and each wait for a workload as they come:
         // to tell a frame drawn in parts from a frame matched wrongly against the one before.
@@ -177,7 +181,7 @@ namespace RT64 {
         void advanceToNextWorkload();
 #   if RT64_GAME_FRAME_WORKLOADS
         void presentQueued(uint64_t presentWorkloadId, uint32_t fbAddress);
-        bool presentQueueFull() const;
+        bool presentWaiting() const;
         uint32_t endedGameFrame(int startCursor, GameFrameEnd &end) const;
         void logGameFrame(int startCursor, uint32_t count, GameFrameEnd end) const;
         static long long logTime();

@@ -95,10 +95,17 @@ namespace RT64 {
         cursorCondition.notify_all();
     }
 
-    // Whether the game's next present waits in PresentQueue::advanceToNextPresent() for the present thread to move on,
-    // as it checks there. Called with cursorMutex held, so the present queue's is taken under this queue's: the present
-    // thread takes none of this queue's under its own but workloadIdMutex, which is held alone everywhere.
-    bool WorkloadQueue::presentQueueFull() const {
+    // Whether the game waits in PresentQueue::advanceToNextPresent() for the present thread to move on, so it can queue
+    // no workload until a frame ends: it is there (presentAdvancing) and the present queue is full, as it checks there.
+    // A full present queue alone isn't that: the game goes on queueing workloads until its next present, and the rest of
+    // a held frame most often comes before it. Called with cursorMutex held, so the present queue's is taken under this
+    // queue's: the present thread takes none of this queue's under its own but workloadIdMutex, which is held alone
+    // everywhere.
+    bool WorkloadQueue::presentWaiting() const {
+        if (!presentAdvancing) {
+            return false;
+        }
+
         PresentQueue &presentQueue = *ext.presentQueue;
         const std::scoped_lock lock(presentQueue.cursorMutex);
         return ((presentQueue.writeCursor + 1) % int(presentQueue.presents.size())) == presentQueue.barrierCursor;
@@ -117,8 +124,8 @@ namespace RT64 {
     //   another framebuffer the VI shows, as the next frame of a game with two or three does, after one that has drawn,
     // - where something waits for one of its workloads (waitForWorkloadId(): a present whose workload is the next
     //   frame's offscreen pass, the setup's warm-up, a pause), once it has as many workloads that draw as the frame
-    //   before had, after HeldFrameLimit, or once the present queue is full (presentQueueFull()), as the game can't
-    //   queue the rest while it waits for a free present: a present that shows the frame before can come in the
+    //   before had, after HeldFrameLimit, or once the game waits for a free present (presentWaiting()), as it can't
+    //   queue the rest then: a present that shows the frame before can come in the
     //   middle of the next one, and a frame ended there was drawn in two, each part matched against the whole frame
     //   before, and its first part shown alone (the presentation's SkipBuffering shows a framebuffer as soon as a frame
     //   draws to it). Mario Party's board, whose frames are six RSP tasks and whose VI shows its frame now and then
@@ -201,7 +208,7 @@ namespace RT64 {
                 heldSince = now;
             }
 
-            if (((now - heldSince) < HeldFrameLimit) && !presentQueueFull()) {
+            if (((now - heldSince) < HeldFrameLimit) && !presentWaiting()) {
                 return 0;
             }
 
