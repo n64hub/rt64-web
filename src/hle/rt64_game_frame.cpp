@@ -310,6 +310,89 @@ namespace RT64 {
         return matchResult;
     }
 
+#if RT64_GAME_FRAME_WORKLOADS
+    void GameFrame::alignDrawnWorkloads(const WorkloadQueue &workloadQueue, const std::vector<uint32_t> &curDrawn, const std::vector<uint32_t> &prevDrawn, std::vector<std::pair<uint32_t, uint32_t>> &drawnPairs) {
+        // Two frames with as many drawn workloads pair them in order. When one draws more (a close-up in a corner that
+        // comes or goes), pairing in order would match every workload after the one that is missing with another's,
+        // and what it draws would be interpolated from another camera's place for a frame. So the longer list's extra
+        // workloads are left out where the cameras of the pairs that are left differ the least, still in order.
+        //
+        // A workload's camera is its first perspective projection's, or its first orthographic one's if it has none.
+        auto workloadCamera = [&](uint32_t workloadIndex) -> const Projection * {
+            const Workload &workload = workloadQueue.workloads[workloadIndex];
+            const Projection *orthographic = nullptr;
+            for (uint32_t f = 0; f < workload.fbPairCount; f++) {
+                const FramebufferPair &fbPair = workload.fbPairs[f];
+                for (uint32_t p = 0; p < fbPair.projectionCount; p++) {
+                    const Projection &proj = fbPair.projections[p];
+                    if (proj.type == Projection::Type::Perspective) {
+                        return &proj;
+                    }
+                    else if ((proj.type == Projection::Type::Orthographic) && (orthographic == nullptr)) {
+                        orthographic = &proj;
+                    }
+                }
+            }
+
+            return orthographic;
+        };
+
+        auto cameraDifference = [&](uint32_t curIndex, uint32_t prevIndex) -> double {
+            const Projection *curProj = workloadCamera(curIndex);
+            const Projection *prevProj = workloadCamera(prevIndex);
+            if ((curProj == nullptr) || (prevProj == nullptr)) {
+                return (curProj == prevProj) ? 0.0 : 1e12;
+            }
+            else if (curProj->type != prevProj->type) {
+                return 1e12;
+            }
+
+            const Workload &curWorkload = workloadQueue.workloads[curIndex];
+            const Workload &prevWorkload = workloadQueue.workloads[prevIndex];
+            return double(matrixDifference(curWorkload.drawData.viewTransforms[curProj->transformsIndex], prevWorkload.drawData.viewTransforms[prevProj->transformsIndex])) +
+                double(matrixDifference(curWorkload.drawData.projTransforms[curProj->transformsIndex], prevWorkload.drawData.projTransforms[prevProj->transformsIndex]));
+        };
+
+        // Every workload of the shorter list is paired with one of the longer's, in order, for the least difference in
+        // all: cost(i, j) is the least for the longer's first i and the shorter's first j.
+        const bool curLonger = curDrawn.size() > prevDrawn.size();
+        const std::vector<uint32_t> &longer = curLonger ? curDrawn : prevDrawn;
+        const std::vector<uint32_t> &shorter = curLonger ? prevDrawn : curDrawn;
+        const size_t n = longer.size();
+        const size_t m = shorter.size();
+        auto pairDifference = [&](size_t i, size_t j) {
+            return curLonger ? cameraDifference(longer[i], shorter[j]) : cameraDifference(shorter[j], longer[i]);
+        };
+
+        thread_local std::vector<double> costs;
+        costs.assign((n + 1) * (m + 1), 0.0);
+        auto cost = [&](size_t i, size_t j) -> double & { return costs[i * (m + 1) + j]; };
+        for (size_t i = 1; i <= n; i++) {
+            for (size_t j = 1; (j <= m) && (j <= i); j++) {
+                const double paired = cost(i - 1, j - 1) + pairDifference(i - 1, j - 1);
+                cost(i, j) = (j < i) ? std::min(paired, cost(i - 1, j)) : paired;
+            }
+        }
+
+        // Walked back from the end, a tie leaves out the later workload, so lists whose cameras all agree keep the
+        // pairing in order.
+        size_t i = n;
+        size_t j = m;
+        while (j > 0) {
+            if ((j < i) && (cost(i - 1, j) <= cost(i, j))) {
+                i--;
+                continue;
+            }
+
+            drawnPairs.emplace_back(curLonger ? longer[i - 1] : shorter[j - 1], curLonger ? shorter[j - 1] : longer[i - 1]);
+            i--;
+            j--;
+        }
+
+        std::reverse(drawnPairs.begin(), drawnPairs.end());
+    }
+#endif
+
     void GameFrame::match(RenderWorker *worker, WorkloadQueue &workloadQueue, const GameFrame &prevFrame, BufferUploader *velocityUploader, bool &velocityUploaderUsed, bool &tileInterpolationUsed, bool &lookAtInterpolationUsed) {
         tileInterpolationUsed = false;
         lookAtInterpolationUsed = false;
@@ -338,17 +421,29 @@ namespace RT64 {
         const std::vector<uint32_t> &curDrawn = workloads;
         const std::vector<uint32_t> &prevDrawn = prevFrame.workloads;
 #endif
-        for (uint32_t w = 0; w < curDrawn.size(); w++) {
-            if (w >= prevDrawn.size()) {
-                continue;
+        thread_local std::vector<std::pair<uint32_t, uint32_t>> drawnPairs;
+        drawnPairs.clear();
+#if RT64_GAME_FRAME_WORKLOADS
+        if (curDrawn.size() != prevDrawn.size()) {
+            alignDrawnWorkloads(workloadQueue, curDrawn, prevDrawn, drawnPairs);
+        }
+        else
+#endif
+        {
+            for (uint32_t w = 0; (w < curDrawn.size()) && (w < prevDrawn.size()); w++) {
+                drawnPairs.emplace_back(curDrawn[w], prevDrawn[w]);
             }
+        }
+
+        for (const std::pair<uint32_t, uint32_t> &drawnPair : drawnPairs) {
+            const uint32_t curWorkloadIndex = drawnPair.first;
 
             // We assume the workloads will be detected in the same order between frames.
-            GameFrameMap::WorkloadMap &workloadMap = frameMap.workloads[curDrawn[w]];
-            workloadMap.prevWorkloadIndex = prevDrawn[w];
+            GameFrameMap::WorkloadMap &workloadMap = frameMap.workloads[curWorkloadIndex];
+            workloadMap.prevWorkloadIndex = drawnPair.second;
             workloadMap.mapped = true;
 
-            Workload &curWorkload = workloadQueue.workloads[curDrawn[w]];
+            Workload &curWorkload = workloadQueue.workloads[curWorkloadIndex];
             const Workload &prevWorkload = workloadQueue.workloads[workloadMap.prevWorkloadIndex];
             workloadMap.viewProjections.clear();
             workloadMap.viewProjections.resize(curWorkload.drawData.viewProjTransforms.size());
@@ -368,7 +463,7 @@ namespace RT64 {
             buildTransformIdMap(curWorkload, curWorkload.transformIdMap, curWorkload.transformIgnoredIds);
 
             // Retrieve the matching maps for the current and previous workload.
-            GameFrameMap::WorkloadMap &curWorkloadMap = frameMap.workloads[curDrawn[w]];
+            GameFrameMap::WorkloadMap &curWorkloadMap = frameMap.workloads[curWorkloadIndex];
             const GameFrameMap::WorkloadMap *prevWorkloadMap = nullptr;
             if (prevFrame.matched && prevFrame.frameMap.workloads[workloadMap.prevWorkloadIndex].mapped) {
                 prevWorkloadMap = &prevFrame.frameMap.workloads[workloadMap.prevWorkloadIndex];
@@ -394,7 +489,7 @@ namespace RT64 {
             }
 
             if (!modifiedBuffers.empty()) {
-                workloadsModified[curDrawn[w]].merge(modifiedBuffers);
+                workloadsModified[curWorkloadIndex].merge(modifiedBuffers);
             }
 
             // Any transforms tagged with the empty ID will be instantly marked as used and skipped.
