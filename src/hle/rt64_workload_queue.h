@@ -28,13 +28,15 @@
 // A game frame of several workloads is drawn once it has ended, and the one before it stays out of the writer's reach
 // until then (WorkloadQueue::renderThreadLoop): the queue holds the frame before, the frame and the game's next one.
 // A game can draw a frame in several, as Jet Force Gemini draws each of its frames in two (its shadows, then the
-// frame) and Mario Party in up to a dozen (an RSP task for each microcode it draws with, and empty ones). A frame that
-// doesn't fit ends where the queue is full and is drawn in parts, the frames between the game's showing the first part
-// alone: with 16, Mario Party's board flickered without its characters, HUD and text now and then. With too few for
-// the next one too the game waits for every interpolated frame to be presented: its frames take longer, its rate falls
-// and the interpolated frames grow, down to a rate of one or two a second and a color target for each of hundreds of
-// display frames.
-#   define WORKLOAD_QUEUE_SIZE 32
+// frame) and Mario Party in up to 17 (an RSP task for each microcode it draws with, and empty ones: a 4-player
+// minigame's field in boxes). A frame that doesn't fit ends where the queue is full and is drawn in parts, the frames
+// between the game's showing the first part alone: with 16, Mario Party's board flickered without its characters, HUD
+// and text now and then, and with 32 a minigame of 16 workloads a frame, which fit beside the frame before only 15 of
+// them, lost its last now and then, and with it the PAUSE window. With too few for the next one too the game waits for
+// every interpolated frame to be presented: its frames take longer, its rate falls and the interpolated frames grow,
+// down to a rate of one or two a second and a color target for each of hundreds of display frames. Each workload keeps
+// the buffers its biggest draws took, so a game of one workload a frame holds that many frames' vertices.
+#   define WORKLOAD_QUEUE_SIZE 64
 #else
 #   define WORKLOAD_QUEUE_SIZE 4
 #endif
