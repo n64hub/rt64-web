@@ -57,6 +57,9 @@ namespace RT64 {
         queuedPresentCursor = 0;
         waitedWorkloadId = 0;
         lastFrameDrawnCount = 0;
+        lastFrameShownFbAddress = 0;
+        frameBeforeShownFbAddress = 0;
+        lastFrameCut = false;
         heldWorkloadId = 0;
 #   endif
     }
@@ -1191,12 +1194,33 @@ namespace RT64 {
                         logGameFrame(threadCursor, frameWorkloadCount, frameEnd);
                     }
 
-                    lastFrameDrawnCount = 0;
+                    // A frame after one cut short that draws to the same framebuffer the VI shows is the rest of it, and the
+                    // two count as one game frame, if that framebuffer isn't the game frame before's: a game that draws each
+                    // frame into the one framebuffer would add up every frame cut at a wait. Counted alone, the rest set how
+                    // many the next frame needed before a wait could end it: Mario Party 2's page, whose present of a frame
+                    // waits on the next frame's first workload, drew Tile Driver's frames in two from the first one cut,
+                    // the cut at the frame before's count and each half the next one's, its boxes and PAUSE window missing
+                    // every other frame.
+                    uint32_t drawnCount = 0;
+                    uint32_t shownFbAddress = 0;
                     for (uint32_t i = 0; i < frameWorkloadCount; i++) {
-                        if (workloads[(threadCursor + i) % workloads.size()].fbPairCount > 0) {
-                            lastFrameDrawnCount++;
-                        }
+                        const Workload &frameWorkload = workloads[(threadCursor + i) % workloads.size()];
+                        drawnCount += (frameWorkload.fbPairCount > 0) ? 1 : 0;
+                        shownFbAddress = frameWorkload.drawsShown ? frameWorkload.shownFbAddress : shownFbAddress;
                     }
+
+                    const bool frameRest = lastFrameCut && (shownFbAddress != 0) && (shownFbAddress == lastFrameShownFbAddress) &&
+                        (shownFbAddress != frameBeforeShownFbAddress);
+                    if (frameRest) {
+                        lastFrameDrawnCount += drawnCount;
+                    }
+                    else {
+                        lastFrameDrawnCount = drawnCount;
+                        frameBeforeShownFbAddress = lastFrameShownFbAddress;
+                        lastFrameShownFbAddress = shownFbAddress;
+                    }
+
+                    lastFrameCut = ((frameEnd == GameFrameEnd::Wait) || (frameEnd == GameFrameEnd::HeldLimit) || (frameEnd == GameFrameEnd::QueueFull));
 #               endif
                     processCursor = threadCursor;
                     threadCursor = (threadCursor + frameWorkloadCount) % workloads.size();

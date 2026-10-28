@@ -122,8 +122,13 @@ namespace RT64 {
         uint64_t waitedWorkloadId = 0;
 
         // How many workloads that draw the last game frame had, and since when a frame with fewer has been held back from
-        // ending where a wait came (endedGameFrame()).
+        // ending where a wait came (endedGameFrame()). A frame cut short (lastFrameCut: at a wait, its hold's limit or
+        // the full queue) and the frame after it are one game frame drawn in two, and count as one, where both draw to
+        // the framebuffer the VI shows that the game frame before didn't (WorkloadQueue::renderThreadLoop).
         uint32_t lastFrameDrawnCount = 0;
+        uint32_t lastFrameShownFbAddress = 0;
+        uint32_t frameBeforeShownFbAddress = 0;
+        bool lastFrameCut = false;
         mutable uint64_t heldWorkloadId = 0;
         mutable std::chrono::steady_clock::time_point heldSince;
 
