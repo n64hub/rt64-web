@@ -3,6 +3,7 @@
 //
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 
 #include "common/rt64_thread.h"
@@ -14,6 +15,11 @@ namespace RT64 {
 
     static uint64_t roundUp(uint64_t value, uint64_t powerOf2Alignment) {
         return (value + powerOf2Alignment - 1) & ~(powerOf2Alignment - 1);
+    }
+
+    static uint64_t newUploadSerial() {
+        static std::atomic<uint64_t> serial = 0;
+        return ++serial;
     }
 
     // BufferUploader::Upload
@@ -96,6 +102,7 @@ namespace RT64 {
             bufferPair.allocatedSize = roundUp(bufferPair.allocatedSize, BlockAlignment);
             bufferPair.uploadBuffer = worker->device->createBuffer(RenderBufferDesc::UploadBuffer(bufferPair.allocatedSize));
             bufferPair.defaultBuffer = worker->device->createBuffer(RenderBufferDesc::DefaultBuffer(bufferPair.allocatedSize, u.bufferFlags));
+            bufferPair.uploadSerial = newUploadSerial();
 
             bufferPair.defaultViews.reserve(u.formatViews.size());
             for (RenderFormat format : u.formatViews) {
@@ -145,6 +152,7 @@ namespace RT64 {
             const uint64_t srcOffset = u.srcDataIndexRange.first * u.srcDataStride;
             const uint64_t srcSize = (u.srcDataIndexRange.second - u.srcDataIndexRange.first) * u.srcDataStride;
             worker->commandList->copyBufferRegion(u.dstPair->defaultBuffer->at(srcOffset), u.dstPair->uploadBuffer->at(srcOffset), srcSize);
+            u.dstPair->uploadSerial = newUploadSerial();
         }
     }
 

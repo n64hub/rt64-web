@@ -32,12 +32,16 @@ namespace RT64 {
             OutputBuffers *outputBuffers = nullptr;
             float curFrameWeight = 1.0f;
             float prevFrameWeight = 0.0f;
+#       if RT64_PACKED_RSP_INPUTS
+            uint32_t packedSlot = 0;
+#       endif
         };
 
         WorldCB worldCB;
         std::unique_ptr<RSPWorldDescriptorSet> descriptorSet;
 #   if RT64_PACKED_RSP_INPUTS
-        RSPPackedInputs packedInputs;
+        std::vector<RSPPackedInputs> packedInputs;
+        uint32_t packedSlot = 0;
 #   endif
 
         VertexProcessor(RenderDevice *device);

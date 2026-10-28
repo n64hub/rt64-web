@@ -36,8 +36,14 @@ namespace RT64 {
             &b.viewProjTransformsBuffer, &b.worldTransformsBuffer
         };
 
-        packedInputs.update(p.worker->device, inputs, processCB.inputOffsets, ProcessInputCount);
-        processSet->setBuffer(processSet->srcInputs, packedInputs.buffer.get(), packedInputs.allocatedSize);
+        packedSlot = p.packedSlot;
+        if (packedInputs.size() <= packedSlot) {
+            packedInputs.resize(packedSlot + 1);
+        }
+
+        RSPPackedInputs &packed = packedInputs[packedSlot];
+        packed.update(p.worker->device, inputs, processCB.inputOffsets, ProcessInputCount);
+        processSet->setBuffer(processSet->srcInputs, packed.buffer.get(), packed.allocatedSize);
 #   else
         processSet->setBuffer(processSet->srcPos, p.drawBuffers->positionBuffer.get(), p.drawBuffers->positionBuffer.getView(0));
         processSet->setBuffer(processSet->srcVel, p.drawBuffers->velocityBuffer.get(), p.drawBuffers->velocityBuffer.getView(0));
@@ -86,7 +92,7 @@ namespace RT64 {
 
             const int dispatchCount = (processCB.vertexCount + ThreadGroupSize - 1) / ThreadGroupSize;
 #       if RT64_PACKED_RSP_INPUTS
-            packedInputs.recordCopies(worker->commandList.get());
+            packedInputs[packedSlot].recordCopies(worker->commandList.get());
 #       endif
             worker->commandList->barriers(RenderBarrierStage::COMPUTE, beforeBarriers, uint32_t(std::size(beforeBarriers)));
             worker->commandList->setPipeline(shaderLibrary->rspProcess.pipeline.get());

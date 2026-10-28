@@ -627,6 +627,9 @@ namespace RT64 {
                 rspParams.outputBuffers = &workload.outputBuffers;
                 rspParams.prevFrameWeight = prevFrameWeight;
                 rspParams.curFrameWeight = curFrameWeight;
+#           if RT64_PACKED_RSP_INPUTS
+                rspParams.packedSlot = w;
+#           endif
                 rspProcessor->process(rspParams);
             }
 
@@ -641,6 +644,9 @@ namespace RT64 {
                 vertexParams.outputBuffers = &workload.outputBuffers;
                 vertexParams.curFrameWeight = curFrameWeight;
                 vertexParams.prevFrameWeight = prevFrameWeight;
+#           if RT64_PACKED_RSP_INPUTS
+                vertexParams.packedSlot = w;
+#           endif
                 vertexProcessor->process(vertexParams);
             }
 

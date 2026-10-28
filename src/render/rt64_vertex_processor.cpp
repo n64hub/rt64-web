@@ -34,8 +34,14 @@ namespace RT64 {
             &b.worldTransformsBuffer, &b.invTWorldTransformsBuffer, &b.prevWorldTransformsBuffer
         };
 
-        packedInputs.update(p.worker->device, inputs, worldCB.inputOffsets, WorldInputCount);
-        descriptorSet->setBuffer(descriptorSet->srcInputs, packedInputs.buffer.get(), packedInputs.allocatedSize);
+        packedSlot = p.packedSlot;
+        if (packedInputs.size() <= packedSlot) {
+            packedInputs.resize(packedSlot + 1);
+        }
+
+        RSPPackedInputs &packed = packedInputs[packedSlot];
+        packed.update(p.worker->device, inputs, worldCB.inputOffsets, WorldInputCount);
+        descriptorSet->setBuffer(descriptorSet->srcInputs, packed.buffer.get(), packed.allocatedSize);
 #   else
         descriptorSet->setBuffer(descriptorSet->srcPos, p.drawBuffers->positionBuffer.get(), p.drawBuffers->positionBuffer.getView(0));
         descriptorSet->setBuffer(descriptorSet->srcVel, p.drawBuffers->velocityBuffer.get(), p.drawBuffers->velocityBuffer.getView(0));
@@ -70,7 +76,7 @@ namespace RT64 {
         const uint32_t ThreadGroupSize = 64;
         const uint32_t dispatchCount = (worldCB.vertexCount + ThreadGroupSize - 1) / ThreadGroupSize;
 #   if RT64_PACKED_RSP_INPUTS
-        packedInputs.recordCopies(worker->commandList.get());
+        packedInputs[packedSlot].recordCopies(worker->commandList.get());
 #   endif
         worker->commandList->barriers(RenderBarrierStage::COMPUTE, beforeBarriers, uint32_t(std::size(beforeBarriers)));
         worker->commandList->setPipeline(shaderLibrary->rspWorld.pipeline.get());

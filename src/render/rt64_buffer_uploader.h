@@ -19,6 +19,10 @@ namespace RT64 {
         std::vector<std::unique_ptr<RenderBufferFormattedView>> defaultViews;
         uint64_t allocatedSize = 0;
 
+        // Set from one count for every buffer pair each time data is copied into defaultBuffer or it is made again, so
+        // two equal serials are the same write: RSPPackedInputs copies an input again only once this changed.
+        uint64_t uploadSerial = 0;
+
         const RenderBuffer *get() const {
             return defaultBuffer.get();
         }
