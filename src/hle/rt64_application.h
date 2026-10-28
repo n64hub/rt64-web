@@ -141,6 +141,8 @@ namespace RT64 {
         std::atomic<bool> debuggerPaused;
         uint64_t frameCounter;
         uint32_t threadsAvailable;
+        uint32_t setupThreadId = 0;
+        bool replacingDevice = false;
         ProfilingTimer dlApiProfiler = ProfilingTimer(120);
         ProfilingTimer screenApiProfiler = ProfilingTimer(120);
 
@@ -164,6 +166,9 @@ namespace RT64 {
         void destroyShaderCache();
         void updateMultisampling();
         void end();
+#   if defined(__EMSCRIPTEN__)
+        void replaceLostDevice();
+#   endif
         bool loadConfiguration();
         bool saveConfiguration();
         bool checkDirectoryCreated(const std::filesystem::path &path);

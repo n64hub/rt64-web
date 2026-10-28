@@ -102,8 +102,11 @@ namespace RT64 {
         }
 #   endif
 
-        // Attempt to load the configuration. If it couldn't be loaded, save a new file instead.
-        if (!loadConfiguration()) {
+        setupThreadId = threadId;
+
+        // Attempt to load the configuration. If it couldn't be loaded, save a new file instead. A device replaced keeps
+        // the configuration it was running with.
+        if (!replacingDevice && !loadConfiguration()) {
             saveConfiguration();
         }
 
@@ -330,9 +333,17 @@ namespace RT64 {
 #   endif
 
         // Call the init hook if one was attached.
-        RenderHookInit *initHook = GetRenderHookInit();
-        if (initHook != nullptr) {
-            initHook(renderInterface.get(), device.get());
+        if (replacingDevice) {
+            RenderHookReplaceDevice *replaceHook = GetRenderHookReplaceDevice();
+            if (replaceHook != nullptr) {
+                replaceHook(renderInterface.get(), device.get());
+            }
+        }
+        else {
+            RenderHookInit *initHook = GetRenderHookInit();
+            if (initHook != nullptr) {
+                initHook(renderInterface.get(), device.get());
+            }
         }
 
         // Create all the render workers.
@@ -570,6 +581,12 @@ namespace RT64 {
     }
 
     void Application::updateScreen() {
+#   if defined(__EMSCRIPTEN__)
+        if (device->isLost()) {
+            replaceLostDevice();
+        }
+#   endif
+
         appWindow->sdlCheckFilterInstallation();
         screenApiProfiler.logAndRestart();
         state->updateScreen(core.decodeVI(), false);
@@ -734,9 +751,17 @@ namespace RT64 {
         presentQueue.reset();
 
         // Call the deinit hook if one was attached.
-        RenderHookDeinit *deinitHook = GetRenderHookDeinit();
-        if (deinitHook != nullptr) {
-            deinitHook();
+        if (replacingDevice) {
+            RenderHookReplaceDevice *replaceHook = GetRenderHookReplaceDevice();
+            if (replaceHook != nullptr) {
+                replaceHook(nullptr, nullptr);
+            }
+        }
+        else {
+            RenderHookDeinit *deinitHook = GetRenderHookDeinit();
+            if (deinitHook != nullptr) {
+                deinitHook();
+            }
         }
 
         drawDataUploader.reset();
@@ -764,6 +789,30 @@ namespace RT64 {
 
         FileDialog::finish();
     }
+
+#   if defined(__EMSCRIPTEN__)
+    // A page's WebGPU device is lost to a driver update or reset, the browser's GPU process crashing or a laptop
+    // switching GPUs, and everything made on it with it. Once the page has a new one (RenderDevice::isLost()), the screen
+    // update before the next frame's lists destroys everything as end() does and sets it all up again on a new device as
+    // setup() does: textures, targets, pipelines and the prebuilt shaders, which the game waits for again, the swap chain.
+    // The game goes on from the same RDRAM, so nothing it has drawn has to be drawn again but what the next frames draw.
+    // The configuration is kept, and so is what a caller set on the state; a render hook's objects are made again with
+    // the replace device hook (rt64_render_hooks.h), not the deinit and init hooks.
+    void Application::replaceLostDevice() {
+        fprintf(stderr, "RT64: the WebGPU device was lost; starting again on a new one.\n");
+        std::atomic<uint32_t> *displayListReads = state->displayListReads;
+        replacingDevice = true;
+        end();
+        const SetupResult result = setup(setupThreadId);
+        replacingDevice = false;
+        if (result != SetupResult::Success) {
+            fprintf(stderr, "RT64 could not start again on a new WebGPU device (%d).\n", int(result));
+            abort();
+        }
+
+        state->displayListReads = displayListReads;
+    }
+#   endif
 
     bool Application::loadConfiguration() {
         if (!appConfig.useConfigurationFile || userPaths.isEmpty()) {

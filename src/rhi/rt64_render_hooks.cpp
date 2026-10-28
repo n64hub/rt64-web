@@ -8,6 +8,7 @@ namespace RT64 {
     static RenderHookInit *init = nullptr;
     static RenderHookDraw *draw = nullptr;
     static RenderHookDeinit *deinit = nullptr;
+    static RenderHookReplaceDevice *replaceDevice = nullptr;
 
     RenderHookInit *GetRenderHookInit() {
         return init;
@@ -25,5 +26,13 @@ namespace RT64 {
         init = init_;
         draw = draw_;
         deinit = deinit_;
+    }
+
+    RenderHookReplaceDevice *GetRenderHookReplaceDevice() {
+        return replaceDevice;
+    }
+
+    void SetRenderHookReplaceDevice(RenderHookReplaceDevice *replaceDevice_) {
+        replaceDevice = replaceDevice_;
     }
 };
