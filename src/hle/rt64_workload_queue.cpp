@@ -483,10 +483,27 @@ namespace RT64 {
             {
                 // Wait until the other queue has stopped using the interpolated color targets.
                 std::unique_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
+#           if RT64_GAME_FRAME_WORKLOADS
+                // While a present holds either set of counters (InterpolatedFrameCounters::inUse), not until the current set
+                // has been presented: no present may ever show it, and the present that would can be waiting for this very
+                // workload, so this waited for good, the present thread and the game behind it. Mario Party 2's page stopped
+                // there at a window's resize now and then. Neither set keeps frames for a present to take after, from the
+                // targets cleared below: one that takes either presents its frame without the interpolated ones.
+                ext.sharedResources->interpolatedCondition.wait(interpolatedLock, [&]() {
+                    return (!ext.sharedResources->interpolatedFrames[0].inUse && !ext.sharedResources->interpolatedFrames[1].inUse) || !threadsRunning;
+                });
+
+                for (InterpolatedFrameCounters &counters : ext.sharedResources->interpolatedFrames) {
+                    counters.available = 0;
+                    counters.presented = counters.count;
+                    counters.skipped = true;
+                }
+#           else
                 InterpolatedFrameCounters &curFrameCounters = ext.sharedResources->interpolatedFrames[ext.sharedResources->interpolatedFramesIndex];
                 ext.sharedResources->interpolatedCondition.wait(interpolatedLock, [&]() {
                     return curFrameCounters.presented >= curFrameCounters.available;
                 });
+#           endif
             }
 
             std::scoped_lock<std::mutex> managerLock(ext.sharedResources->managerMutex);
