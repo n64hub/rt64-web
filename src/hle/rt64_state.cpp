@@ -1335,7 +1335,23 @@ namespace RT64 {
                     renderParams.omH = shaderDesc.otherMode.H;
                     renderParams.flags = shaderDesc.flags;
 
-                    workload.drawData.rdpParams.emplace_back(gameCall.callDesc.rdpParams);
+                    // With ALPHA_CVG_SEL and without CVG_X_ALPHA, the RDP's alpha compare tests the pixel's coverage (its
+                    // count of 8 times 32, 255 for a covered pixel), not the combiner's alpha, so a threshold of the blend
+                    // color's alpha keeps every covered pixel however low the combiner's alpha is. The raster shader tests
+                    // the combiner's alpha, so such a draw lost every pixel whose alpha was below the blend color's: Mario
+                    // Party 2's minigame backgrounds (its engine's func_8007A7FC: an opaque picture in rects, alpha TEXEL0
+                    // times a PRIM_LOD_FRAC of 0, against a blend alpha of 1) drew none of their picture. The blend color's
+                    // alpha is nothing else in the shaders (the blender takes only its color), so such a draw takes a
+                    // threshold of 0 and keeps every pixel, as a covered pixel is on a console, with no change to its
+                    // shader. A dithered compare (a random threshold) is left as it was.
+                    interop::RDPParams rdpParams = gameCall.callDesc.rdpParams;
+                    if ((callDesc.otherMode.alphaCompare() == G_AC_THRESHOLD) && callDesc.otherMode.alphaCvgSel() &&
+                        !callDesc.otherMode.cvgXAlpha())
+                    {
+                        rdpParams.blendColor.w = 0.0f;
+                    }
+
+                    workload.drawData.rdpParams.emplace_back(rdpParams);
                     workload.drawData.renderParams.emplace_back(renderParams);
                 }
             }
