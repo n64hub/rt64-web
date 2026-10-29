@@ -2987,13 +2987,45 @@ namespace RT64 {
 
                 viShowsAny = true;
                 for (uint32_t f = 0; f < workload.fbPairCount; f++) {
-                    const FramebufferPair &fbPair = workload.fbPairs[f];
+                    FramebufferPair &fbPair = workload.fbPairs[f];
                     const bool drawsEntry = !fbPair.drawColorRect.isEmpty() && (fbPair.colorImage.address == shown.address) &&
                         (fbPair.colorImage.width == shown.width) && (fbPair.colorImage.siz == shown.siz);
 
                     if (drawsEntry) {
                         shown.workloadId = workload.workloadId;
                     }
+
+#               if RT64_PARTIAL_SCREEN_PAIRS
+                    // RT64_PARTIAL_SCREEN_PAIRS: the framebuffer renderer judges a pair's scissorRect as the screen. It
+                    // narrows the pair's scissors, rects and viewports to 4:3 in a wide window only if that is 4:3-shaped,
+                    // and keeps a view or a rect at its aspect, or widens it to the window's edges, only if it covers that
+                    // rect's whole width (as the projection processor does). A game that sends a view of a split screen in
+                    // an RSP task of its own makes a pair of that view alone: a half of the screen (152x240) was drawn
+                    // unnarrowed, a 4:3 projection under a scissor out to the window's edge, and a quarter (158x121, near
+                    // enough 4:3) widened to the window's edges as a screen of its own, while the views drawn in the same
+                    // task as the frame's clear stopped at 4:3. A pair that draws into a framebuffer the VI shows and
+                    // whose scissors leave out more than a tenth of its width is judged by the whole screen instead, as it
+                    // is beside the rest of the screen in one task. Offscreen targets, a pair whose scissors span the
+                    // screen's width (a letterbox, a horizontal split's view), and a pair that drew under an extended
+                    // scissor (gEXSetScissor with an origin: a widescreen patch placing it itself, as mario-party-engine's
+                    // board camera is through Mario Party 3's sideways wipe) are judged as before.
+                    const int32_t screenWidth = int32_t(fbPair.colorImage.width) << 2;
+                    const int32_t screenHeight = int32_t(workload.viFbSize.y) << 2;
+                    if (drawsEntry && (screenHeight > 0) && !fbPair.scissorRect.isNull() && ((fbPair.scissorRect.lrx - fbPair.scissorRect.ulx) * 10 < screenWidth * 9)) {
+                        bool extendedScissor = false;
+                        for (uint32_t p = 0; (p < fbPair.projectionCount) && !extendedScissor; p++) {
+                            const Projection &proj = fbPair.projections[p];
+                            for (uint32_t c = 0; (c < proj.gameCallCount) && !extendedScissor; c++) {
+                                const DrawCall &callDesc = proj.gameCalls[c].callDesc;
+                                extendedScissor = (callDesc.scissorLeftOrigin != G_EX_ORIGIN_NONE) || (callDesc.scissorRightOrigin != G_EX_ORIGIN_NONE);
+                            }
+                        }
+
+                        if (!extendedScissor) {
+                            fbPair.scissorRect.merge(FixedRect(0, 0, screenWidth, screenHeight));
+                        }
+                    }
+#               endif
 
                     // The last of the shown framebuffers it draws to.
                     if (drawsEntry && (!workload.drawsShown || (f >= lastShownPair))) {

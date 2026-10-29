@@ -22,6 +22,7 @@ option(RT64_FREE_DISCARDED_TARGETS "Free the render targets of a framebuffer who
 option(RT64_INTERPOLATE_CAMERA_EYE "Interpolate a camera's eye between two game frames on the line between its two places, not by lerping the view's translation, which is the eye in the view's own axes (always on with Emscripten)" OFF)
 option(RT64_SKIP_COLLAPSED_MATCHES "Never pair a transform that collapses what it draws (a zero determinant: a scale of 0, or a matrix of zeros) with one that does not, from one game frame to the next, so that an object the game hides is not interpolated between its last matrix and none (always on with Emscripten)" OFF)
 option(RT64_SCISSOR_INSIDE_FRAMEBUFFER "Count an extended scissor reaching past the framebuffer's left or right edge only to that edge in the area a framebuffer pair drew in, so that what covers the frame's whole width (a projection RT64 keeps at its aspect, a fill it widens) is the same on a frame that draws under one (always on with Emscripten)" OFF)
+option(RT64_PARTIAL_SCREEN_PAIRS "Judge a framebuffer pair that draws only part of a framebuffer the VI shows (a view of a split screen the game sends in an RSP task of its own) by the whole screen, so its views and rects are kept at 4:3 in a wide window as they are beside the rest of the screen in one task (always on with Emscripten)" OFF)
 
 if (NOT ${RT64_STATIC})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -551,6 +552,9 @@ if (RT64_SKIP_COLLAPSED_MATCHES OR RT64_WGSL)
 endif()
 if (RT64_SCISSOR_INSIDE_FRAMEBUFFER OR RT64_WGSL)
     target_compile_definitions(rt64 PRIVATE RT64_SCISSOR_INSIDE_FRAMEBUFFER=1)
+endif()
+if (RT64_PARTIAL_SCREEN_PAIRS OR RT64_WGSL)
+    target_compile_definitions(rt64 PRIVATE RT64_PARTIAL_SCREEN_PAIRS=1)
 endif()
 
 # Add common libraries.
