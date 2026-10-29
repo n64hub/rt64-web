@@ -284,6 +284,18 @@ namespace RT64 {
             return matchResult;
         }
 
+#   if RT64_SKIP_COLLAPSED_MATCHES
+        // Nor between one that collapses what it draws (a zero determinant) and one that doesn't: a game hides an object
+        // by scaling it to 0 or loading a matrix of zeros, and the frames between drew a matrix that no game frame had.
+        // Mario Party 2's board hides the star it hands out with matrices of zeros, which were paired with matrices of
+        // the frame before that still drew it, and the frames between drew its triangles across the whole view in
+        // front of the board. Unpaired, each is drawn at its own matrix between the frames: what the game hid draws
+        // nothing there, as in the game's frame, and what comes back from 0 is at its place from the frame it comes.
+        if ((m0det == 0.0f) != (m1det == 0.0f)) {
+            return matchResult;
+        }
+#   endif
+
         // Compute the difference between the translation components of the 4x4 matrices.
         const hlslpp::float3 curPos = curTransform[3].xyz;
         hlslpp::float3 prevPos = prevTransform[3].xyz;
