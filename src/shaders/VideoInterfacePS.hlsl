@@ -11,7 +11,14 @@ SamplerState gSampler : register(s2);
 // Limit texture sampling to the area the VI can sample of the texture.
 
 float4 SampleInput(float2 uv) {
+#ifdef WEBGPU
+    // WebGPU has no border addressing, and plume clamps it to the edge, so where the VI shows more lines or columns than
+    // the target has (a framebuffer the game draws only partway down) the target's last row would repeat to the
+    // picture's edge. Limiting the area to the texture makes those samples the border's black, as they are elsewhere.
+    const float2 LowerRight = min(gConstants.videoResolution / gConstants.textureResolution, float2(1.0f, 1.0f));
+#else
     const float2 LowerRight = gConstants.videoResolution / gConstants.textureResolution;
+#endif
     const float2 HalfPixel = float2(0.5f, 0.5f) / gConstants.textureResolution;
     float2 outsideBorder = step(LowerRight, uv);
     float4 sampledColor = gInput.SampleLevel(gSampler, clamp(uv, HalfPixel, LowerRight - HalfPixel), 0);
