@@ -155,10 +155,21 @@ namespace RT64 {
         }
     }
     
-    void RenderTarget::copyFromTarget(RenderWorker *worker, RenderTarget *src, uint32_t x, uint32_t y, uint32_t width, uint32_t height, const ShaderLibrary *shaderLibrary) {
+    void RenderTarget::copyFromTarget(RenderWorker *worker, RenderTarget *src, int32_t x, int32_t y, int32_t width, int32_t height, const ShaderLibrary *shaderLibrary) {
         assert(worker != nullptr);
         assert(src != nullptr);
         assert(format != src->format);
+
+        // The rect is the last write's, which reaches past the target's edges where a wide picture's 3D does (left of x 0
+        // in a wide window). The shaders read the source at each pixel's own position, so only the part inside the target
+        // is drawn: a GPU clips the rest anyway, and WebGPU refuses a viewport past the target.
+        const int32_t left = std::clamp<int32_t>(x, 0, int32_t(this->width));
+        const int32_t top = std::clamp<int32_t>(y, 0, int32_t(this->height));
+        const int32_t right = std::clamp<int32_t>(x + width, left, int32_t(this->width));
+        const int32_t bottom = std::clamp<int32_t>(y + height, top, int32_t(this->height));
+        if ((left == right) || (top == bottom)) {
+            return;
+        }
 
         // Select shader based on the formats.
         RenderTextureLayout requiredTextureLayout = RenderTextureLayout::UNKNOWN;
@@ -200,8 +211,8 @@ namespace RT64 {
         copyCB.usesHDR = usesHDR;
 
         // Record the drawing command.
-        RenderViewport targetViewport = RenderViewport(float(x), float(y), float(width), float(height));
-        RenderRect targetRect(x, y, x + width, y + height);
+        RenderViewport targetViewport = RenderViewport(float(left), float(top), float(right - left), float(bottom - top));
+        RenderRect targetRect(left, top, right, bottom);
         worker->commandList->setViewports(targetViewport);
         worker->commandList->setScissors(targetRect);
         worker->commandList->setPipeline(shaderRecord->pipeline.get());
