@@ -6,6 +6,7 @@
 
 #include <array>
 #include <chrono>
+#include <thread>
 
 #include "common/rt64_enhancement_configuration.h"
 #include "common/rt64_profiling_timer.h"
@@ -120,6 +121,11 @@ namespace RT64 {
         std::array<QueuedPresent, 8> queuedPresents;
         uint32_t queuedPresentCursor = 0;
         uint64_t waitedWorkloadId = 0;
+
+        // The thread that queues the workloads (advanceToNextWorkload()), and the newest workload it waits for itself: it
+        // queues nothing while it waits, so a frame that wait is in can't be held for the rest (endedGameFrame()).
+        std::thread::id writerThread;
+        uint64_t writerWaitedWorkloadId = 0;
 
         // How many workloads that draw the last game frame had, and since when a frame with fewer has been held back from
         // ending where a wait came (endedGameFrame()). A frame cut short (lastFrameCut: at a wait, its hold's limit or

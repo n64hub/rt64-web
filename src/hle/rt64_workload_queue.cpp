@@ -56,6 +56,7 @@ namespace RT64 {
         queuedPresents = {};
         queuedPresentCursor = 0;
         waitedWorkloadId = 0;
+        writerWaitedWorkloadId = 0;
         lastFrameDrawnCount = 0;
         lastFrameShownFbAddress = 0;
         frameBeforeShownFbAddress = 0;
@@ -78,6 +79,9 @@ namespace RT64 {
         {
             const std::scoped_lock lock(cursorMutex);
             writeCursor = nextWriteCursor;
+#       if RT64_GAME_FRAME_WORKLOADS
+            writerThread = std::this_thread::get_id();
+#       endif
         }
 
         cursorCondition.notify_all();
@@ -128,7 +132,10 @@ namespace RT64 {
     // - where something waits for one of its workloads (waitForWorkloadId(): a present whose workload is the next
     //   frame's offscreen pass, the setup's warm-up, a pause), once it has as many workloads that draw as the frame
     //   before had, after HeldFrameLimit, or once the game waits for a free present (presentWaiting()), as it can't
-    //   queue the rest then: a present that shows the frame before can come in the
+    //   queue the rest then, and at once where the thread that queues the workloads is what waits, for the same
+    //   reason: Pokémon Snap's port waits for each list's workload before its game goes on, and the camera check after
+    //   a course, a list of offscreen passes alone for each photo's thumbnail, sat out HeldFrameLimit twice a photo,
+    //   gaps of 430-930 ms where the game drew nothing. A present that shows the frame before can come in the
     //   middle of the next one, and a frame ended there was drawn in two, each part matched against the whole frame
     //   before, and its first part shown alone (the presentation's SkipBuffering shows a framebuffer as soon as a frame
     //   draws to it). Mario Party's board, whose frames are six RSP tasks and whose VI shows its frame now and then
@@ -150,6 +157,7 @@ namespace RT64 {
         bool drawsShown = false;
         uint32_t shownFbAddress = 0;
         bool waitedFor = false;
+        bool writerWaited = false;
         bool offscreen = false;
         uint32_t drawnCount = 0;
         for (int c = startCursor; c != writeCursor; c = (c + 1) % queueSize) {
@@ -189,6 +197,7 @@ namespace RT64 {
             }
 
             waitedFor = waitedFor || (workload.workloadId <= waitedWorkloadId);
+            writerWaited = writerWaited || (workload.workloadId <= writerWaitedWorkloadId);
         }
 
         const bool queueFull = ((writeCursor + 1) % queueSize) == uint32_t(barrierCursor);
@@ -202,8 +211,8 @@ namespace RT64 {
         }
 
         // A frame with fewer workloads that draw than the one before, or of offscreen passes alone, is held for the rest of
-        // them, up to HeldFrameLimit or until the game waits for a free present.
-        if ((drawsShown && (drawnCount < lastFrameDrawnCount)) || (!drawsShown && offscreen)) {
+        // them, up to HeldFrameLimit or until the game waits for a free present, unless the game waits for it itself.
+        if (((drawsShown && (drawnCount < lastFrameDrawnCount)) || (!drawsShown && offscreen)) && !writerWaited) {
             const uint64_t firstWorkloadId = workloads[startCursor].workloadId;
             const auto now = std::chrono::steady_clock::now();
             if (heldWorkloadId != firstWorkloadId) {
@@ -286,6 +295,10 @@ namespace RT64 {
         {
             const std::scoped_lock lock(cursorMutex);
             waitedWorkloadId = std::max(waitedWorkloadId, waitId);
+            if (std::this_thread::get_id() == writerThread) {
+                writerWaitedWorkloadId = std::max(writerWaitedWorkloadId, waitId);
+            }
+
             if (frameLog) {
                 fprintf(stderr, "WAIT t=%lld wl=%llu\n", logTime(), (unsigned long long)(waitId));
             }
