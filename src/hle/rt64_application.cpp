@@ -318,6 +318,13 @@ namespace RT64 {
         }
 
 #   if defined(RT64_WGSL)
+        // The high precision framebuffer's format, rgba16unorm, is a render target or storage texture in WebGPU only with
+        // the optional texture-formats-tier1 feature, the WGSL shaders declare the framebuffer's storage textures rgba8
+        // (WebGPU.hlsli, IMAGE_FORMAT) and a game's prebuilt shader list is recorded at the standard format, so a page
+        // draws in the standard one whatever the setting. With On (a game's default, or a profile's) the page failed at
+        // the first target's createTexture and trapped after.
+        usesHDR = false;
+
         // A depth target with a stencil, for the prebuilt decals (RasterShader::createPipeline()), where the device has
         // depth32float-stencil8, an optional feature of WebGPU.
         if (device->getSampleCountsSupported(RenderFormat::D32_FLOAT_S8_UINT) & RenderSampleCount::COUNT_1) {
