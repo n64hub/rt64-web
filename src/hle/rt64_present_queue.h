@@ -62,8 +62,17 @@ namespace RT64 {
         VIHistory viHistory;
         bool presentWaitEnabled = false;
         uint32_t pacingMultiple = 0;
-        std::deque<std::pair<Timestamp, bool>> pacingPresents;
+        // pace()'s window: when each present was taken, whether it was dropped, and pacingShown then.
+        struct PacingPresent {
+            Timestamp time;
+            bool dropped;
+            uint64_t shown;
+        };
+
+        std::deque<PacingPresent> pacingPresents;
         uint32_t pacingDropped = 0;
+        // Frames the present thread has presented, for how many went out in pace()'s window.
+        uint64_t pacingShown = 0;
         Timestamp pacingChanged;
         Timestamp pacingRaised;
         int64_t pacingRetryMicro = 0;

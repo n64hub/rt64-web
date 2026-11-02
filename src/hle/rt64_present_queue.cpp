@@ -477,6 +477,9 @@ namespace RT64 {
                 PhaseTimer phaseTimer(this, PhasePresent);
                 swapChainValid = ext.swapChain->present(swapChainIndex, &waitSemaphore, 1);
                 presentProfiler.logAndRestart();
+#           if defined(__EMSCRIPTEN__)
+                pacingShown++;
+#           endif
             }
         }
 
@@ -522,7 +525,13 @@ namespace RT64 {
     // while the page is hidden, when none is presented (below), or for a second after, as after a wait: a hidden page's
     // presents dropped while the browser held its present callbacks (plume's isHidden()), and Mario Kart 64's page on a
     // 240 Hz display went from 114 presents a second to 60 while hidden, each try of the number above falling straight
-    // back and doubling the time to the next, so it stayed at 60 for 80 s after the tab came back.
+    // back and doubling the time to the next, so it stayed at 60 for 80 s after the tab came back. Nor are presents
+    // dropped while the presents before them went out on their slots: the GPU kept up, and presents were only queued
+    // sooner than the slots their game frames were given, which fewer presents a frame shows no more evenly. So drops
+    // count only while fewer than 95% of the presents the window's rate makes went out in it. Dinosaur Planet's page,
+    // in the CloudRunner flight, queued 45 presents a second for 30 game frames, with the GPU 2% busy, and stayed at
+    // one present a game frame (45 a second, 240 at the display's rate) for the last 65 s of a play: at each try of
+    // the number above it dropped a present in ten or more while the present thread slept until every slot.
     // A page opened with ?present-stats prints where the present thread's time went before each present it drops
     // (reportDroppedPresent()).
     void PresentQueue::pace(bool presentDropped) {
@@ -592,15 +601,20 @@ namespace RT64 {
             return;
         }
 
-        pacingPresents.emplace_back(now, presentDropped);
+        pacingPresents.push_back({ now, presentDropped, pacingShown });
         pacingDropped += presentDropped ? 1 : 0;
-        while (Timer::deltaMicroseconds(pacingPresents.front().first, now) > 2'000'000) {
-            pacingDropped -= pacingPresents.front().second ? 1 : 0;
+        while (Timer::deltaMicroseconds(pacingPresents.front().time, now) > 2'000'000) {
+            pacingDropped -= pacingPresents.front().dropped ? 1 : 0;
             pacingPresents.pop_front();
         }
 
-        const bool wholeWindow = Timer::deltaMicroseconds(pacingPresents.front().first, now) >= 1'900'000;
-        const bool fallingBehind = wholeWindow && (pacingDropped >= 4) && ((pacingDropped * 10) >= pacingPresents.size());
+        // The rate presents are meant to go out at (present()'s), and whether fewer went out in the window.
+        const int64_t windowMicro = Timer::deltaMicroseconds(pacingPresents.front().time, now);
+        const uint32_t presentRate = (pacingMultiple > 0) ? std::min(pacedMultipleAtMost(pacingMultiple) * originalRate, targetRate) : targetRate;
+        const uint64_t shown = pacingShown - pacingPresents.front().shown;
+        const bool shownBehind = (shown * 1'000'000 * 20) < (uint64_t(presentRate) * uint64_t(windowMicro) * 19);
+        const bool wholeWindow = windowMicro >= 1'900'000;
+        const bool fallingBehind = wholeWindow && shownBehind && (pacingDropped >= 4) && ((pacingDropped * 10) >= pacingPresents.size());
         const int64_t sinceChange = Timer::deltaMicroseconds(pacingChanged, now);
         if (fallingBehind && (pacingMultiple != 1)) {
             pacingMultiple = pacedMultipleAtMost((pacingMultiple > 0) ? (pacingMultiple - 1) : (targetRate / originalRate));
