@@ -473,13 +473,13 @@ namespace RT64 {
                 }
 
                 RenderCommandSemaphore *waitSemaphore = drawSemaphores[swapChainIndex].get();
+#           if defined(__EMSCRIPTEN__)
+                pacingShown++;
+#           endif
                 presentTimestamp = Timer::current();
                 PhaseTimer phaseTimer(this, PhasePresent);
                 swapChainValid = ext.swapChain->present(swapChainIndex, &waitSemaphore, 1);
                 presentProfiler.logAndRestart();
-#           if defined(__EMSCRIPTEN__)
-                pacingShown++;
-#           endif
             }
         }
 
