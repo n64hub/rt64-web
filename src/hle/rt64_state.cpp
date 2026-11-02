@@ -2152,6 +2152,12 @@ namespace RT64 {
         Workload &nextWorkload = ext.workloadQueue->workloads[workloadCursor];
         nextWorkload.begin(workloadCounter++);
 
+        // The RSP's matrices carry over into the next display list, but the transforms they were added as are the
+        // ended workload's: a list that draws before it loads a projection or a matrix would index the next workload's
+        // transforms by the ended one's, past their end. Each is added to it again first.
+        rsp->projectionMatrixChanged = true;
+        rsp->modelViewProjChanged = true;
+
         // Indicate on the framebuffer manager that all tile copies are free to be used again.
         framebufferManager.clearUsedTileCopies();
 
