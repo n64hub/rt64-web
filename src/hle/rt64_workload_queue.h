@@ -6,7 +6,6 @@
 
 #include <array>
 #include <chrono>
-#include <thread>
 
 #include "common/rt64_enhancement_configuration.h"
 #include "common/rt64_profiling_timer.h"

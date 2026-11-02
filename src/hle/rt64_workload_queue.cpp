@@ -66,6 +66,14 @@ namespace RT64 {
     }
 
     void WorkloadQueue::advanceToNextWorkload() {
+#   if RT64_GAME_FRAME_WORKLOADS
+        // The thread that queues the workloads, which waitForWorkloadId() tells from the others.
+        {
+            const std::scoped_lock lock(cursorMutex);
+            writerThread = std::this_thread::get_id();
+        }
+#   endif
+
         int nextWriteCursor = (writeCursor + 1) % workloads.size();
 
         // Stall the thread until the barrier is lifted if we're trying to write on a workload being used by the GPU.
@@ -79,9 +87,6 @@ namespace RT64 {
         {
             const std::scoped_lock lock(cursorMutex);
             writeCursor = nextWriteCursor;
-#       if RT64_GAME_FRAME_WORKLOADS
-            writerThread = std::this_thread::get_id();
-#       endif
         }
 
         cursorCondition.notify_all();
