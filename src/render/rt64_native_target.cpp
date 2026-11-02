@@ -166,12 +166,13 @@ namespace RT64 {
         readBuffer.nativeUploadBuffer->unmap();
 
         // On WebGPU, reading the count back makes the list wait for the GPU and the page's thread (10-90 ms on the
-        // first list of a new screen). When the previous buffer still holds what the CPU uploaded to it, count the
-        // pixels that differ from it here instead, the same count FbReadAnyChangesCS makes.
+        // first list of a new screen, 2-4 ms a framebuffer after). When the CPU knows what the previous buffer holds
+        // (what it uploaded, and what render to RAM read back of the frames drawn into it since), count the pixels
+        // that differ from it here instead, the same count FbReadAnyChangesCS makes.
         bool countOnGPU = hasCurrentResource;
         uint32_t modifiedCount = 0;
 #   if defined(__EMSCRIPTEN__)
-        if (hasCurrentResource && previousReadBuffer->uploadedDataValid && (previousReadBuffer->uploadedData.size() >= bufferSize)) {
+        if (hasCurrentResource && previousReadBuffer->uploadedDataValid && (previousReadBuffer->pendingWrites == 0) && (previousReadBuffer->uploadedData.size() >= bufferSize)) {
             const uint32_t pixelCount = width * height;
             const uint8_t *previousData = previousReadBuffer->uploadedData.data();
             switch (siz) {
@@ -190,6 +191,7 @@ namespace RT64 {
         }
 
         readBuffer.uploadedData.assign(data, data + bufferSize);
+        readBuffer.pendingWrites = 0;
         readBuffer.uploadedDataValid = true;
 #   endif
 
@@ -373,8 +375,22 @@ namespace RT64 {
         }
 
         writeBuffer.writeDescSet->setBuffer(writeBuffer.writeDescSet->gOutput, readBuffer->nativeBuffer.get(), bufferSize, readBuffer->nativeBufferWriteView.get());
+        const uint64_t regionBufferOffset = getNativeSize(rowWidth, rowStart, siz);
+        const uint64_t regionBufferSize = getNativeSize(rowWidth, rowEnd - rowStart, siz);
 #   if defined(__EMSCRIPTEN__)
-        readBuffer->uploadedDataValid = false;
+        // The rows written here reach uploadedData when copyToRAM reads them back. A write that never is (a target
+        // nothing copies to RAM, a late copy the CPU's own writes kept from landing) leaves it pending, so the next
+        // change count of this buffer is the GPU's.
+        if (readBuffer->uploadedDataValid && (readBuffer->uploadedData.size() >= (regionBufferOffset + regionBufferSize))) {
+            readBuffer->pendingWrites++;
+            writeBuffer.uploadedDataBuffer = readBuffer->nativeBuffer.get();
+            writeBuffer.writtenOffset = regionBufferOffset;
+            writeBuffer.writtenSize = regionBufferSize;
+        }
+        else {
+            readBuffer->uploadedDataValid = false;
+            writeBuffer.uploadedDataBuffer = nullptr;
+        }
 #   endif
 
         if (smallerReadBuffer != nullptr) {
@@ -408,9 +424,6 @@ namespace RT64 {
         };
 
         worker->commandList->barriers(RenderBarrierStage::COPY, copyBarriers, uint32_t(std::size(copyBarriers)));
-
-        const uint64_t regionBufferOffset = getNativeSize(rowWidth, rowStart, siz);
-        const uint64_t regionBufferSize = getNativeSize(rowWidth, rowEnd - rowStart, siz);
         worker->commandList->copyBufferRegion(writeBuffer.nativeReadbackBuffer->at(regionBufferOffset), readBuffer->nativeBuffer->at(regionBufferOffset), regionBufferSize);
     }
 
@@ -423,6 +436,29 @@ namespace RT64 {
         RenderRange readRange = { bufferOffset, bufferOffset + bufferSize };
         uint8_t *readbackData = reinterpret_cast<uint8_t *>(writeBuffer.nativeReadbackBuffer->map(0, &readRange));
         memcpy(data, readbackData + bufferOffset, bufferSize);
+#   if defined(__EMSCRIPTEN__)
+        // Rendering to RAM wrote these rows of the read buffer, so they go into what the CPU knows of it. Read back
+        // in part, the buffer holds rows the CPU doesn't know.
+        if (writeBuffer.uploadedDataBuffer != nullptr) {
+            for (ReadBuffer &readBuffer : readBufferHistory) {
+                if (readBuffer.nativeBuffer.get() != writeBuffer.uploadedDataBuffer) {
+                    continue;
+                }
+
+                if (readBuffer.uploadedDataValid && (readBuffer.pendingWrites > 0)) {
+                    if ((bufferOffset == writeBuffer.writtenOffset) && (bufferSize == writeBuffer.writtenSize)) {
+                        memcpy(readBuffer.uploadedData.data() + bufferOffset, readbackData + bufferOffset, bufferSize);
+                        readBuffer.pendingWrites--;
+                    }
+                    else {
+                        readBuffer.uploadedDataValid = false;
+                    }
+                }
+
+                break;
+            }
+        }
+#   endif
         writeBuffer.nativeReadbackBuffer->unmap();
         writeBufferHistoryIndex++;
     }

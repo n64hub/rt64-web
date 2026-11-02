@@ -29,8 +29,10 @@ namespace RT64 {
             uint8_t nativeBufferNextViewFormat = 0;
             uint8_t nativeBufferWriteViewFormat = 0;
 #       if defined(__EMSCRIPTEN__)
-            // What copyFromRAM last uploaded to nativeBuffer, while nothing else has written to it since.
+            // What copyFromRAM last uploaded to nativeBuffer, with what copyToNative wrote there since put in as
+            // copyToRAM reads it back: the bytes nativeBuffer holds while no write is pending.
             std::vector<uint8_t> uploadedData;
+            uint32_t pendingWrites = 0;
             bool uploadedDataValid = false;
 #       endif
         };
@@ -39,6 +41,12 @@ namespace RT64 {
             std::unique_ptr<FramebufferWriteDescriptorBufferSet> writeDescSet;
             std::unique_ptr<RenderBuffer> nativeReadbackBuffer;
             uint32_t nativeReadbackBufferSize = 0;
+#       if defined(__EMSCRIPTEN__)
+            // The read buffer whose uploadedData takes this write once it's read back, and where it wrote.
+            const RenderBuffer *uploadedDataBuffer = nullptr;
+            uint64_t writtenOffset = 0;
+            uint64_t writtenSize = 0;
+#       endif
         };
 
         std::unique_ptr<RenderBuffer> changeCountBuffer;
