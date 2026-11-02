@@ -613,7 +613,41 @@ namespace RT64 {
             }
 
             // Synchronization will be required unless direct reinterpretation is possible (which is not implemented yet).
+#       if defined(__EMSCRIPTEN__)
+            // A framebuffer whose format changed is read whole from RAM before the pair draws to it, so RAM has to hold
+            // what the pairs before it drew there: a sync, which draws them and copies them to RAM, but only if one of
+            // the pairs since the last sync drew to some of that RAM. RAM that none of them drew to already holds what
+            // the CPU or an earlier sync left there, which is what the read wants. Each sync waits for the GPU to finish
+            // and for its readback, 4-16 ms in Chrome and more in Firefox: Pokemon Snap's camera check draws each
+            // photo's thumbnail in 22 pairs, most of them to a framebuffer the CPU rewrote since the list before
+            // (discarded, so new), which none of the pairs before it drew to, and synchronized at nearly every one.
+            const auto unsyncedPairsOverlap = [&](const Framebuffer *fb) {
+                for (int p = fbPairIndex - 1; p >= 0; p--) {
+                    const FramebufferPair &pair = workload.fbPairs[p];
+                    if (!pair.drawColorRect.isEmpty()) {
+                        const Framebuffer *pairColorFb = framebufferManager.find(pair.colorImage.address);
+                        const Framebuffer *pairDepthFb = (pair.depthRead || pair.depthWrite) ? framebufferManager.find(pair.depthImage.address) : nullptr;
+                        if (((pairColorFb != nullptr) && fb->overlaps(pairColorFb->addressStart, pairColorFb->addressEnd)) ||
+                            ((pairDepthFb != nullptr) && fb->overlaps(pairDepthFb->addressStart, pairDepthFb->addressEnd)))
+                        {
+                            return true;
+                        }
+                    }
+
+                    // A sync at this pair (a format change's or a tile's) drew the ones before it and copied them to RAM.
+                    if (pair.syncRequired) {
+                        return false;
+                    }
+                }
+
+                return false;
+            };
+
+            const bool depthFormatChanged = (depthFb != nullptr) && depthImg.formatChanged;
+            if ((colorImg.formatChanged && unsyncedPairsOverlap(colorFb)) || (depthFormatChanged && unsyncedPairsOverlap(depthFb))) {
+#       else
             if (colorImg.formatChanged || depthImg.formatChanged) {
+#       endif
                 fbPair.syncRequired = true;
             }
 
