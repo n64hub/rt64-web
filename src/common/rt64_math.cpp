@@ -298,10 +298,13 @@ namespace RT64 {
             // Solve the equation by inverting PerspectiveMatrix and multiplying
             // rightHandSide by the inverse.  (This is the easiest way, not
             // necessarily the best.)
+            // recomposeMatrix multiplies PerspectiveMatrix by a matrix whose last column is the perspective, so this
+            // column is PerspectiveMatrix times the perspective and the inverse goes in untransposed. glm transposes it
+            // for its column-major indexing: here that brought in the translation, and a far object's rounding error in
+            // this column became a perspective as large as its translation over its scale.
             hlslpp::float4x4 InversePerspectiveMatrix = inverse(PerspectiveMatrix);
-            hlslpp::float4x4 TransposedInversePerspectiveMatrix = transpose(InversePerspectiveMatrix);
 
-            perspective = hlslpp::mul(TransposedInversePerspectiveMatrix, RightHandSide);
+            perspective = hlslpp::mul(InversePerspectiveMatrix, RightHandSide);
 
             // Clear the perspective partition
             LocalMatrix[0][3] = LocalMatrix[1][3] = LocalMatrix[2][3] = 0.0f;
