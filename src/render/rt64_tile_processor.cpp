@@ -35,12 +35,11 @@ namespace RT64 {
                         continue;
                     }
 
-                    const interop::RDPTile &curTile = curRdpTiles[t];
                     interop::RDPTile &lerpTile = lerpRdpTiles[t];
-                    lerpTile.uls = tileMap.prevUls + (curTile.uls - tileMap.prevUls) * p.curFrameWeight;
-                    lerpTile.ult = tileMap.prevUlt + (curTile.ult - tileMap.prevUlt) * p.curFrameWeight;
-                    lerpTile.lrs = tileMap.prevLrs + (curTile.lrs - tileMap.prevLrs) * p.curFrameWeight;
-                    lerpTile.lrt = tileMap.prevLrt + (curTile.lrt - tileMap.prevLrt) * p.curFrameWeight;
+                    lerpTile.uls = tileMap.prevUls + (tileMap.curUls - tileMap.prevUls) * p.curFrameWeight;
+                    lerpTile.ult = tileMap.prevUlt + (tileMap.curUlt - tileMap.prevUlt) * p.curFrameWeight;
+                    lerpTile.lrs = tileMap.prevLrs + (tileMap.curLrs - tileMap.prevLrs) * p.curFrameWeight;
+                    lerpTile.lrt = tileMap.prevLrt + (tileMap.curLrt - tileMap.prevLrt) * p.curFrameWeight;
                 }
             }
         }

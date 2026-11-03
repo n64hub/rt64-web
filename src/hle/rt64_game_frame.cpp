@@ -1000,9 +1000,118 @@ namespace RT64 {
             curTileMap.prevLrs = placeS ? (curTile.lrs - curTileMap.deltaLrs) : curTile.lrs;
             curTileMap.prevUlt = placeT ? (curTile.ult - curTileMap.deltaUlt) : curTile.ult;
             curTileMap.prevLrt = placeT ? (curTile.lrt - curTileMap.deltaLrt) : curTile.lrt;
+            curTileMap.curUls = curTile.uls;
+            curTileMap.curUlt = curTile.ult;
+            curTileMap.curLrs = curTile.lrs;
+            curTileMap.curLrt = curTile.lrt;
+
+            // A slow scroll (a quarter texel every few frames, on two frames of three, or 1, 2 and 4 quarters by
+            // turns) isn't steady above, so it was drawn where the game put it, a step at a time, or placed on some
+            // frames and not others, which a magnified texture shows as a stutter. An edge that stepped the same way
+            // at least twice in its last 16 frames and never more than a texel moves on every frame at the rate it
+            // moved at over about its last 32, steered a quarter of the way each frame toward half its largest step
+            // behind the game's place, which follows a scroll that speeds up: each frame starting where the last one
+            // ended, never ahead of the game's own place, so a scroll that stops comes to rest where the game put
+            // it, and never further behind it than two steps and a frame's move. One that steps further, turns back
+            // or jumps starts over, drawn as above. A step across a masked tile's wrap is the step it took inside
+            // the tile.
+            const float curValues[4] = { curTile.uls, curTile.ult, curTile.lrs, curTile.lrt };
+            const float rawDeltas[4] = { deltaUls, deltaUlt, deltaLrs, deltaLrt };
+            const int wrapPeriods[4] = {
+                (curTile.cms == G_TX_WRAP) ? curTile.masks * 4 : 0, (curTile.cmt == G_TX_WRAP) ? curTile.maskt * 4 : 0,
+                (curTile.cms == G_TX_WRAP) ? curTile.masks * 4 : 0, (curTile.cmt == G_TX_WRAP) ? curTile.maskt * 4 : 0
+            };
+
+            float slowFrom[4];
+            float slowTo[4];
+            bool slowMoving[4];
+            bool slowStanding[4];
+            for (uint32_t e = 0; e < 4; e++) {
+                float step = rawDeltas[e];
+                const int period = wrapPeriods[e];
+                if ((period > 0) && (fabsf(step) >= float(period / 2))) {
+                    const int inside = modulo(std::lround(step), period);
+                    step = float((inside > (period / 2)) ? (inside - period) : inside);
+                }
+
+                float &moved = curTileMap.slowMoved[e];
+                float &largest = curTileMap.slowLargest[e];
+                float &behind = curTileMap.slowBehind[e];
+                uint16_t &frames = curTileMap.slowFrames[e];
+                uint16_t &steps = curTileMap.slowSteps[e];
+                const bool turned = (step != 0.0f) && (moved != 0.0f) && ((step < 0.0f) != (moved < 0.0f));
+                const bool leapt = (fabsf(step) > 4.0f);
+                if (turned || leapt) {
+                    moved = 0.0f;
+                    largest = 0.0f;
+                    behind = 0.0f;
+                    frames = 0;
+                    steps = 0;
+                }
+
+                if (!leapt) {
+                    moved += step;
+                    largest = std::max(largest, fabsf(step));
+                    steps = uint16_t((steps << 1) | ((step != 0.0f) ? 1 : 0));
+                    frames++;
+                    if (frames >= 32) {
+                        frames /= 2;
+                        moved /= 2.0f;
+                    }
+                }
+
+                const uint32_t window = std::min(uint32_t(frames), 16U);
+                const uint32_t windowMask = (1U << window) - 1;
+                const uint32_t recent = steps & windowMask;
+                uint32_t stepCount = 0;
+                for (uint32_t r = recent; r != 0; r &= (r - 1)) {
+                    stepCount++;
+                }
+
+                slowMoving[e] = (frames >= 4) && (stepCount >= 2) && (moved != 0.0f);
+                slowStanding[e] = (moved == 0.0f) && (rawDeltas[e] == 0.0f);
+                if (slowMoving[e]) {
+                    const float rate = moved / float(frames);
+                    const float direction = (rate < 0.0f) ? -1.0f : 1.0f;
+                    const float band = (largest * 2.0f) + fabsf(rate);
+                    const float behindStart = std::clamp(direction * (behind + step), 0.0f, band);
+                    const float move = std::max(fabsf(rate) + (behindStart - (largest * 0.5f)) * 0.25f, 0.0f);
+                    const float behindEnd = std::clamp(behindStart - move, 0.0f, band);
+                    behind = direction * behindEnd;
+                    slowFrom[e] = curValues[e] - direction * behindStart;
+                    slowTo[e] = curValues[e] - direction * behindEnd;
+                }
+                else {
+                    behind = 0.0f;
+                    slowFrom[e] = curValues[e];
+                    slowTo[e] = curValues[e];
+                }
+            }
+
+            // Both edges of a direction scroll together, or one stands while the other scrolls, as above.
+            auto slowDirection = [&](uint32_t a, uint32_t b) {
+                return (slowMoving[a] || slowMoving[b]) && (slowMoving[a] || slowStanding[a]) && (slowMoving[b] || slowStanding[b]);
+            };
+
+            const bool slowS = slowDirection(0, 2);
+            const bool slowT = slowDirection(1, 3);
+            if (slowS) {
+                curTileMap.prevUls = slowFrom[0];
+                curTileMap.curUls = slowTo[0];
+                curTileMap.prevLrs = slowFrom[2];
+                curTileMap.curLrs = slowTo[2];
+            }
+
+            if (slowT) {
+                curTileMap.prevUlt = slowFrom[1];
+                curTileMap.curUlt = slowTo[1];
+                curTileMap.prevLrt = slowFrom[3];
+                curTileMap.curLrt = slowTo[3];
+            }
+
             curTileMap.mapped = true;
             firstCurWorkloadMap.prevTilesMapped[indices.second] = true;
-            tileInterpolationUsed = tileInterpolationUsed || tileScrolled;
+            tileInterpolationUsed = tileInterpolationUsed || tileScrolled || slowS || slowT;
         }
 
         // Check for look at matches.

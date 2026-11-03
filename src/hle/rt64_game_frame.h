@@ -64,6 +64,18 @@ namespace RT64 {
             float prevUlt = 0;
             float prevLrs = 0;
             float prevLrt = 0;
+            float curUls = 0;
+            float curUlt = 0;
+            float curLrs = 0;
+            float curLrt = 0;
+
+            // Each edge's slow scroll (uls, ult, lrs, lrt): how far it moved over how many frames, which of its last
+            // 16 frames it stepped on, its largest step, and how far behind the game's place the last frame left it.
+            float slowMoved[4] = {};
+            float slowLargest[4] = {};
+            float slowBehind[4] = {};
+            uint16_t slowFrames[4] = {};
+            uint16_t slowSteps[4] = {};
             bool mapped = false;
         };
 
