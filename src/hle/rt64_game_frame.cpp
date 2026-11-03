@@ -1186,13 +1186,42 @@ namespace RT64 {
             }
         }
 
+        if ((curGroup.texcoordInterpolation != G_EX_COMPONENT_SKIP) && (curVertexCount == prevVertexCount)) {
+            const std::vector<float> &curTcFloats = curWorkload.drawData.tcFloats;
+            const std::vector<float> &prevTcFloats = prevWorkload.drawData.tcFloats;
+            std::vector<float> &curVelFloats = curWorkload.drawData.tcVelFloats;
+            const hlslpp::float2 WrappingModulo = curWorkload.extended.texcoordWrapPoint;
+            const hlslpp::float2 WrappingModuloHalf = WrappingModulo / 2.0f;
+            uint64_t curTcHash = XXH3_64bits(&curTcFloats[curVertexIndex * 2], curVertexCount * 2 * sizeof(float));
+            uint64_t prevTcHash = XXH3_64bits(&prevTcFloats[prevVertexIndex * 2], prevVertexCount * 2 * sizeof(float));
+            if (((curGroup.texcoordInterpolation != G_EX_COMPONENT_AUTO) || (curVertexHash == prevVertexHash)) && (curTcHash != prevTcHash)) {
+                const float *curTcFloatsRef = &curTcFloats[curVertexIndex * 2];
+                const float *prevTcFloatsRef = &prevTcFloats[prevVertexIndex * 2];
+                float *curVelFloatsRef = &curVelFloats[curVertexIndex * 2];
+                for (uint32_t i = 0; i < curVertexCount; i++) {
+                    curVelFloatsRef[i * 2 + 0] = (curTcFloatsRef[i * 2 + 0] - prevTcFloatsRef[i * 2 + 0]);
+                    curVelFloatsRef[i * 2 + 1] = (curTcFloatsRef[i * 2 + 1] - prevTcFloatsRef[i * 2 + 1]);
+
+                    if (fabsf(curVelFloatsRef[i * 2]) > WrappingModuloHalf[0]) {
+                        curVelFloatsRef[i * 2] -= lround(curVelFloatsRef[i * 2] / WrappingModulo[0]) * WrappingModulo[0];
+                    }
+
+                    if (fabsf(curVelFloatsRef[i * 2 + 1]) > WrappingModuloHalf[1]) {
+                        curVelFloatsRef[i * 2 + 1] -= lround(curVelFloatsRef[i * 2 + 1] / WrappingModulo[1]) * WrappingModulo[1];
+                    }
+                }
+            }
+
+            modifiedBuffers.texcoordVelocity = true;
+        }
+
         // Vertices the game's CPU moves itself under a matrix it keeps (Rayman 2's menu cursor, a butterfly whose eye
         // and body it places anew every frame) moved only on the game's own frames, while what moves by its matrix
         // moved on every frame drawn. A game that says nothing of them (no matrix ID, so no vertex interpolation of its
         // choosing) has them moved between frames too, from where the frame before drew them, when the two have as
         // many vertices and none moved further than the largest side of the box they span: the same thing moving, not
-        // a buffer the game filled with something else. Apart from the extended GBI's interpolation above, which a
-        // game fork may change in its own patches.
+        // a buffer the game filled with something else. In a block of its own after the extended GBI's interpolation and
+        // the texture coordinates', whose lines a game fork may change in its own patches.
         const bool autoVertices = (curGroup.matrixId == G_EX_ID_AUTO) && (curGroup.vertexInterpolation == G_EX_COMPONENT_SKIP);
         if (autoVertices && (curVertexCount > 0) && (curVertexCount == prevVertexCount)) {
             const std::vector<float> &curPosFloats = curWorkload.drawData.posFloats;
@@ -1221,35 +1250,6 @@ namespace RT64 {
 
                 modifiedBuffers.positionVelocity = true;
             }
-        }
-
-        if ((curGroup.texcoordInterpolation != G_EX_COMPONENT_SKIP) && (curVertexCount == prevVertexCount)) {
-            const std::vector<float> &curTcFloats = curWorkload.drawData.tcFloats;
-            const std::vector<float> &prevTcFloats = prevWorkload.drawData.tcFloats;
-            std::vector<float> &curVelFloats = curWorkload.drawData.tcVelFloats;
-            const hlslpp::float2 WrappingModulo = curWorkload.extended.texcoordWrapPoint;
-            const hlslpp::float2 WrappingModuloHalf = WrappingModulo / 2.0f;
-            uint64_t curTcHash = XXH3_64bits(&curTcFloats[curVertexIndex * 2], curVertexCount * 2 * sizeof(float));
-            uint64_t prevTcHash = XXH3_64bits(&prevTcFloats[prevVertexIndex * 2], prevVertexCount * 2 * sizeof(float));
-            if (((curGroup.texcoordInterpolation != G_EX_COMPONENT_AUTO) || (curVertexHash == prevVertexHash)) && (curTcHash != prevTcHash)) {
-                const float *curTcFloatsRef = &curTcFloats[curVertexIndex * 2];
-                const float *prevTcFloatsRef = &prevTcFloats[prevVertexIndex * 2];
-                float *curVelFloatsRef = &curVelFloats[curVertexIndex * 2];
-                for (uint32_t i = 0; i < curVertexCount; i++) {
-                    curVelFloatsRef[i * 2 + 0] = (curTcFloatsRef[i * 2 + 0] - prevTcFloatsRef[i * 2 + 0]);
-                    curVelFloatsRef[i * 2 + 1] = (curTcFloatsRef[i * 2 + 1] - prevTcFloatsRef[i * 2 + 1]);
-
-                    if (fabsf(curVelFloatsRef[i * 2]) > WrappingModuloHalf[0]) {
-                        curVelFloatsRef[i * 2] -= lround(curVelFloatsRef[i * 2] / WrappingModulo[0]) * WrappingModulo[0];
-                    }
-
-                    if (fabsf(curVelFloatsRef[i * 2 + 1]) > WrappingModuloHalf[1]) {
-                        curVelFloatsRef[i * 2 + 1] -= lround(curVelFloatsRef[i * 2 + 1] / WrappingModulo[1]) * WrappingModulo[1];
-                    }
-                }
-            }
-
-            modifiedBuffers.texcoordVelocity = true;
         }
     }
     
