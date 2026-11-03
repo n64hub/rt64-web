@@ -301,6 +301,18 @@ namespace RT64 {
         // TODO: Should it query from the FB pair somehow if it's an FB pair that is supposed to have aspect ratio adjustment?
         float targetWidth, targetHeight, targetLeft, targetTop;
         const bool pillarBox = resolutionScale[0] > resolutionScale[1];
+#   if RT64_STRETCH_CPU_CHANGES
+        // RT64_STRETCH_CPU_CHANGES: the changes cover a wide target's whole width, each pixel as many times wider as
+        // the target is wider than 4:3, so a full-screen effect the CPU draws (a game's transition) reaches the sides
+        // the 3D was widened into, not only the middle.
+        if (pillarBox) {
+            targetWidth = fbWidth * resolutionScale.x;
+            targetHeight = fbHeight * resolutionScale.y;
+            targetLeft = 0.0f;
+            targetTop = rowStart * resolutionScale.y;
+        }
+        else
+#   endif
         if (pillarBox) {
             targetWidth = fbWidth * resolutionScale.y;
             targetHeight = fbHeight * resolutionScale.y;
