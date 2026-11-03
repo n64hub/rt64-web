@@ -1165,14 +1165,7 @@ namespace RT64 {
         uint32_t curVertexCount = curWorkload.drawData.worldTransformVertexCount(curTransformIndex);
         uint32_t prevVertexIndex = prevWorkload.drawData.worldTransformVertexIndices[prevTransformIndex];
         uint32_t prevVertexCount = prevWorkload.drawData.worldTransformVertexCount(prevTransformIndex);
-        // Vertices the game's CPU moves itself under a matrix it keeps (Rayman 2's menu cursor, a butterfly whose eye
-        // and body it places anew every frame) moved only on the game's own frames, while what moves by its matrix
-        // moved on every frame drawn. A game that says nothing of them (no matrix ID, so no vertex interpolation of its
-        // choosing) has them moved between frames too, from where the frame before drew them, when the two have as
-        // many vertices and none moved further than the largest side of the box they span: the same thing moving, not
-        // a buffer the game filled with something else.
-        const bool autoVertices = (curGroup.matrixId == G_EX_ID_AUTO) && (curGroup.vertexInterpolation == G_EX_COMPONENT_SKIP);
-        if (((curGroup.vertexInterpolation != G_EX_COMPONENT_SKIP) || (curGroup.texcoordInterpolation == G_EX_COMPONENT_AUTO) || autoVertices) && (curVertexCount == prevVertexCount)) {
+        if (((curGroup.vertexInterpolation != G_EX_COMPONENT_SKIP) || (curGroup.texcoordInterpolation == G_EX_COMPONENT_AUTO)) && (curVertexCount == prevVertexCount)) {
             const std::vector<float> &curPosFloats = curWorkload.drawData.posFloats;
             const std::vector<float> &prevPosFloats = prevWorkload.drawData.posFloats;
             std::vector<float> &curVelFloats = curWorkload.drawData.velFloats;
@@ -1191,30 +1184,42 @@ namespace RT64 {
 
                 modifiedBuffers.positionVelocity = true;
             }
-            else if (autoVertices && (curVertexCount > 0) && (curVertexHash != prevVertexHash)) {
-                const float *curPosFloatsRef = &curPosFloats[curVertexIndex * 3];
-                const float *prevPosFloatsRef = &prevPosFloats[prevVertexIndex * 3];
-                float minPos[3] = { FLT_MAX, FLT_MAX, FLT_MAX };
-                float maxPos[3] = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
-                float maxMove = 0.0f;
-                for (uint32_t i = 0; i < curVertexCount; i++) {
-                    for (uint32_t j = 0; j < 3; j++) {
-                        const float pos = curPosFloatsRef[i * 3 + j];
-                        minPos[j] = std::min(minPos[j], pos);
-                        maxPos[j] = std::max(maxPos[j], pos);
-                        maxMove = std::max(maxMove, fabsf(pos - prevPosFloatsRef[i * 3 + j]));
-                    }
+        }
+
+        // Vertices the game's CPU moves itself under a matrix it keeps (Rayman 2's menu cursor, a butterfly whose eye
+        // and body it places anew every frame) moved only on the game's own frames, while what moves by its matrix
+        // moved on every frame drawn. A game that says nothing of them (no matrix ID, so no vertex interpolation of its
+        // choosing) has them moved between frames too, from where the frame before drew them, when the two have as
+        // many vertices and none moved further than the largest side of the box they span: the same thing moving, not
+        // a buffer the game filled with something else. Apart from the extended GBI's interpolation above, which a
+        // game fork may change in its own patches.
+        const bool autoVertices = (curGroup.matrixId == G_EX_ID_AUTO) && (curGroup.vertexInterpolation == G_EX_COMPONENT_SKIP);
+        if (autoVertices && (curVertexCount > 0) && (curVertexCount == prevVertexCount)) {
+            const std::vector<float> &curPosFloats = curWorkload.drawData.posFloats;
+            const std::vector<float> &prevPosFloats = prevWorkload.drawData.posFloats;
+            std::vector<float> &curVelFloats = curWorkload.drawData.velFloats;
+            const float *curPosFloatsRef = &curPosFloats[curVertexIndex * 3];
+            const float *prevPosFloatsRef = &prevPosFloats[prevVertexIndex * 3];
+            float minPos[3] = { FLT_MAX, FLT_MAX, FLT_MAX };
+            float maxPos[3] = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+            float maxMove = 0.0f;
+            for (uint32_t i = 0; i < curVertexCount; i++) {
+                for (uint32_t j = 0; j < 3; j++) {
+                    const float pos = curPosFloatsRef[i * 3 + j];
+                    minPos[j] = std::min(minPos[j], pos);
+                    maxPos[j] = std::max(maxPos[j], pos);
+                    maxMove = std::max(maxMove, fabsf(pos - prevPosFloatsRef[i * 3 + j]));
+                }
+            }
+
+            const float extent = std::max(std::max(maxPos[0] - minPos[0], maxPos[1] - minPos[1]), maxPos[2] - minPos[2]);
+            if ((maxMove > 0.0f) && (maxMove <= extent)) {
+                float *curVelFloatsRef = &curVelFloats[curVertexIndex * 3];
+                for (uint32_t i = 0; i < (curVertexCount * 3); i++) {
+                    curVelFloatsRef[i] = curPosFloatsRef[i] - prevPosFloatsRef[i];
                 }
 
-                const float extent = std::max(std::max(maxPos[0] - minPos[0], maxPos[1] - minPos[1]), maxPos[2] - minPos[2]);
-                if (maxMove <= extent) {
-                    float *curVelFloatsRef = &curVelFloats[curVertexIndex * 3];
-                    for (uint32_t i = 0; i < (curVertexCount * 3); i++) {
-                        curVelFloatsRef[i] = curPosFloatsRef[i] - prevPosFloatsRef[i];
-                    }
-
-                    modifiedBuffers.positionVelocity = true;
-                }
+                modifiedBuffers.positionVelocity = true;
             }
         }
 
