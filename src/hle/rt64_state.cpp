@@ -110,6 +110,9 @@ namespace RT64 {
         drawCall.triangleCount = 0;
         drawCall.minWorldMatrix = USHRT_MAX;
         drawCall.maxWorldMatrix = 0;
+        drawCall.coverCorners = 0;
+        drawCall.coverPossible = true;
+        drawCall.coversViewport = false;
         drawCall.rect.reset();
         drawCall.rectDsdx = 0;
         drawCall.rectDtdy = 0;
@@ -508,6 +511,7 @@ namespace RT64 {
         drawCall.NoN = rsp->NoN;
         drawCall.drawStatusChanges = drawStatus.changed;
         drawCall.callIndex = workload.gameCallCount++;
+        drawCall.coversViewport = drawCall.coverPossible && (drawCall.coverCorners == 0xF);
 
         // Add the draw call to the FB pair.
         GameCall gameCall;
@@ -561,6 +565,9 @@ namespace RT64 {
         drawCall.minWorldMatrix = USHRT_MAX;
         drawCall.maxWorldMatrix = 0;
         drawCall.triangleCount = 0;
+        drawCall.coverCorners = 0;
+        drawCall.coverPossible = true;
+        drawCall.coversViewport = false;
     }
     
     void State::submitFramebufferPair(FramebufferPair::FlushReason flushReason) {

@@ -5,6 +5,7 @@
 #include "rt64_rsp.h"
 
 #include <cassert>
+#include <cmath>
 
 #include "../include/rt64_extended_gbi.h"
 #include "common/rt64_common.h"
@@ -1161,6 +1162,48 @@ namespace RT64 {
 
         unprojectable = unprojectable || ((behindCount > 0) && (behindCount < 3));
         bool visibleTri = (behindCount < 3);
+
+#   if RT64_STRETCH_SCREEN_COVERS
+        // A screen cover is drawn in 3D as a few triangles placed just in front of the camera and sized to cover the 4:3
+        // screen (a plate a scene opens behind, a fade): a call of at most 8 triangles, each wholly in front of the camera
+        // and within the viewport's guard band (its size again past each edge), that between them hold the viewport's
+        // four corners. A scene's own geometry reaches behind the camera or far past the screen, or is more triangles.
+        if (drawCall.coverPossible) {
+            const interop::RSPViewport &coverViewport = viewportStack[viewportStackSize - 1];
+            const float halfWidth = std::abs(float(coverViewport.scale.x));
+            const float halfHeight = std::abs(float(coverViewport.scale.y));
+            const float centerX = float(coverViewport.translate.x);
+            const float centerY = float(coverViewport.translate.y);
+            bool insideGuard = (behindCount == 0) && !unprojectable && (drawCall.triangleCount < 8) && (halfWidth > 0.0f) && (halfHeight > 0.0f);
+            for (int i = 0; (i < 3) && insideGuard; i++) {
+                const hlslpp::float3 &s = posScreen[globalIndices[i]];
+                insideGuard = (std::abs(float(s[0]) - centerX) <= 2.0f * halfWidth) && (std::abs(float(s[1]) - centerY) <= 2.0f * halfHeight);
+            }
+
+            if (insideGuard) {
+                const hlslpp::float3 &p0 = posScreen[globalIndices[0]];
+                const hlslpp::float3 &p1 = posScreen[globalIndices[1]];
+                const hlslpp::float3 &p2 = posScreen[globalIndices[2]];
+                auto edge = [](float ax, float ay, float bx, float by, float px, float py) {
+                    return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+                };
+
+                for (uint32_t c = 0; c < 4; c++) {
+                    const float px = centerX + (((c & 1) != 0) ? halfWidth : -halfWidth);
+                    const float py = centerY + (((c & 2) != 0) ? halfHeight : -halfHeight);
+                    const float e0 = edge(float(p0[0]), float(p0[1]), float(p1[0]), float(p1[1]), px, py);
+                    const float e1 = edge(float(p1[0]), float(p1[1]), float(p2[0]), float(p2[1]), px, py);
+                    const float e2 = edge(float(p2[0]), float(p2[1]), float(p0[0]), float(p0[1]), px, py);
+                    if (((e0 >= 0.0f) && (e1 >= 0.0f) && (e2 >= 0.0f)) || ((e0 <= 0.0f) && (e1 <= 0.0f) && (e2 <= 0.0f))) {
+                        drawCall.coverCorners |= (1U << c);
+                    }
+                }
+            }
+            else {
+                drawCall.coverPossible = false;
+            }
+        }
+#   endif
         const bool usesCulling = geometryMode & cullBothMask;
         if (usesCulling && visibleTri && !unprojectable && !farOut) {
             const hlslpp::float3 U = posScreen[globalIndices[1]] - posScreen[globalIndices[0]];

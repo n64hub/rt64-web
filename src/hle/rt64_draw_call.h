@@ -105,6 +105,12 @@ namespace RT64 {
         uint32_t cullBothMask;
         uint32_t shadingSmoothMask;
 
+        // A screen cover (RT64_STRETCH_SCREEN_COVERS): the corners of its viewport the call's triangles hold, a bit each,
+        // whether it can still be one, and whether it is one, set as the call is flushed.
+        uint8_t coverCorners;
+        bool coverPossible;
+        bool coversViewport;
+
         // GBI extended parameters.
         DrawExtendedType extendedType;
         DrawExtendedData extendedData;

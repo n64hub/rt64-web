@@ -24,6 +24,7 @@ option(RT64_SKIP_COLLAPSED_MATCHES "Never pair a transform that collapses what i
 option(RT64_SCISSOR_INSIDE_FRAMEBUFFER "Count an extended scissor reaching past the framebuffer's left or right edge only to that edge in the area a framebuffer pair drew in, so that what covers the frame's whole width (a projection RT64 keeps at its aspect, a fill it widens) is the same on a frame that draws under one (always on with Emscripten)" OFF)
 option(RT64_STRETCH_CPU_CHANGES "Stretch what the CPU writes into a framebuffer RT64 draws wider than its 4:3 (Aspect Ratio Expand or Manual) across the whole width, not into the 4:3 middle, for a game that draws a full-screen effect from the CPU and writes it squeezed by as much (off with Emscripten too: a game turns it on)" OFF)
 option(RT64_PARTIAL_SCREEN_PAIRS "Judge a framebuffer pair that draws only part of a framebuffer the VI shows (a view of a split screen the game sends in an RSP task of its own) by the whole screen, so its views and rects are kept at 4:3 in a wide window as they are beside the rest of the screen in one task (always on with Emscripten)" OFF)
+option(RT64_STRETCH_SCREEN_COVERS "Stretch a call of a few triangles in front of a perspective camera that covers its whole viewport (a plate or a fade a game draws in 3D, sized to the 4:3 screen) across a picture RT64 draws wider than 4:3, as a rect that spans the scissor's width is, so it still covers the picture (always on with Emscripten)" OFF)
 
 if (NOT ${RT64_STATIC})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -559,6 +560,9 @@ if (RT64_PARTIAL_SCREEN_PAIRS OR RT64_WGSL)
 endif()
 if (RT64_STRETCH_CPU_CHANGES)
     target_compile_definitions(rt64 PRIVATE RT64_STRETCH_CPU_CHANGES=1)
+endif()
+if (RT64_STRETCH_SCREEN_COVERS OR RT64_WGSL)
+    target_compile_definitions(rt64 PRIVATE RT64_STRETCH_SCREEN_COVERS=1)
 endif()
 
 # Add common libraries.

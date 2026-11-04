@@ -1558,6 +1558,9 @@ namespace RT64 {
             triangles.screenOffset = halfPixelOffset;
 
             float projInvRatioScale = 1.0f / aspectRatioScale;
+#       if RT64_STRETCH_SCREEN_COVERS
+            bool projWideViewport = false;
+#       endif
             const int16_t *viewportClipRatios = &drawData.viewportClipRatios[proj.transformsIndex * 4];
             const uint16_t viewportOrigin = drawData.viewportOrigins[proj.transformsIndex];
             if (proj.usesViewport()) {
@@ -1569,6 +1572,9 @@ namespace RT64 {
                 bool useWideViewport = (viewportOrigin == G_EX_ORIGIN_NONE) && coversWholeWidth && horizontalRatio;
                 if (useWideViewport) {
                     projInvRatioScale = 1.0f;
+#               if RT64_STRETCH_SCREEN_COVERS
+                    projWideViewport = true;
+#               endif
                 }
                 else {
                     triangles.screenScale.x = originalWidth / wideWidth;
@@ -1581,6 +1587,10 @@ namespace RT64 {
 
                 viewportClip = convertViewportRect(viewport.rect(viewportClipRatios), p.resolutionScale, p.fbWidth, projInvRatioScale, extOriginPercentage, 0.0f, viewportOrigin, viewportOrigin);
             }
+
+#       if RT64_STRETCH_SCREEN_COVERS
+            const float projScreenScaleX = triangles.screenScale.x;
+#       endif
 
             for (uint32_t d = 0; (d < proj.gameCallCount) && (globalCallIndex < p.maxGameCall); d++) {
                 const GameCall &call = proj.gameCalls[d];
@@ -1709,6 +1719,14 @@ namespace RT64 {
                             instanceDrawCall.type = InstanceDrawCall::Type::IndexedTriangles;
                             triangles.indexStart = triangles.vertexTestZ ? vertexTestZFaceIndicesStart : call.meshDesc.faceIndicesStart;
                             invRatioScale = projInvRatioScale;
+#                       if RT64_STRETCH_SCREEN_COVERS
+                            // A screen cover (RSP::drawIndexedTri) in a perspective viewport widened to the picture is
+                            // stretched across it, as a rect that spans the scissor's width is, so it still covers the
+                            // picture. An orthographic one is left as it is: a quad that fills a 2D screen is more often a
+                            // menu's picture than a cover.
+                            const bool stretchCover = projWideViewport && (proj.type == Projection::Type::Perspective) && call.callDesc.coversViewport;
+                            triangles.screenScale.x = stretchCover ? (projScreenScaleX * aspectRatioScale) : projScreenScaleX;
+#                       endif
                             break;
                         }
                         case Projection::Type::Rectangle: {
