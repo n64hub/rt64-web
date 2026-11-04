@@ -110,9 +110,6 @@ namespace RT64 {
         drawCall.triangleCount = 0;
         drawCall.minWorldMatrix = USHRT_MAX;
         drawCall.maxWorldMatrix = 0;
-        drawCall.coverCorners = 0;
-        drawCall.coverPossible = true;
-        drawCall.coversViewport = false;
         drawCall.rect.reset();
         drawCall.rectDsdx = 0;
         drawCall.rectDtdy = 0;
@@ -565,9 +562,6 @@ namespace RT64 {
         drawCall.minWorldMatrix = USHRT_MAX;
         drawCall.maxWorldMatrix = 0;
         drawCall.triangleCount = 0;
-        drawCall.coverCorners = 0;
-        drawCall.coverPossible = true;
-        drawCall.coversViewport = false;
     }
     
     void State::submitFramebufferPair(FramebufferPair::FlushReason flushReason) {

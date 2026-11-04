@@ -5,7 +5,6 @@
 #include "rt64_rsp.h"
 
 #include <cassert>
-#include <cmath>
 
 #include "../include/rt64_extended_gbi.h"
 #include "common/rt64_common.h"
@@ -1168,16 +1167,22 @@ namespace RT64 {
         // screen (a plate a scene opens behind, a fade): a call of at most 8 triangles, each wholly in front of the camera
         // and within the viewport's guard band (its size again past each edge), that between them hold the viewport's
         // four corners. A scene's own geometry reaches behind the camera or far past the screen, or is more triangles.
+        if (drawCall.triangleCount == 0) {
+            drawCall.coverCorners = 0;
+            drawCall.coverPossible = true;
+        }
+
         if (drawCall.coverPossible) {
+            auto magnitude = [](float v) { return (v < 0.0f) ? -v : v; };
             const interop::RSPViewport &coverViewport = viewportStack[viewportStackSize - 1];
-            const float halfWidth = std::abs(float(coverViewport.scale.x));
-            const float halfHeight = std::abs(float(coverViewport.scale.y));
+            const float halfWidth = magnitude(float(coverViewport.scale.x));
+            const float halfHeight = magnitude(float(coverViewport.scale.y));
             const float centerX = float(coverViewport.translate.x);
             const float centerY = float(coverViewport.translate.y);
             bool insideGuard = (behindCount == 0) && !unprojectable && (drawCall.triangleCount < 8) && (halfWidth > 0.0f) && (halfHeight > 0.0f);
             for (int i = 0; (i < 3) && insideGuard; i++) {
                 const hlslpp::float3 &s = posScreen[globalIndices[i]];
-                insideGuard = (std::abs(float(s[0]) - centerX) <= 2.0f * halfWidth) && (std::abs(float(s[1]) - centerY) <= 2.0f * halfHeight);
+                insideGuard = (magnitude(float(s[0]) - centerX) <= 2.0f * halfWidth) && (magnitude(float(s[1]) - centerY) <= 2.0f * halfHeight);
             }
 
             if (insideGuard) {

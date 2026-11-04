@@ -106,7 +106,8 @@ namespace RT64 {
         uint32_t shadingSmoothMask;
 
         // A screen cover (RT64_STRETCH_SCREEN_COVERS): the corners of its viewport the call's triangles hold, a bit each,
-        // whether it can still be one, and whether it is one, set as the call is flushed.
+        // and whether it can still be one, both reset at its first triangle, and whether it is one, set as the call is
+        // flushed.
         uint8_t coverCorners;
         bool coverPossible;
         bool coversViewport;
