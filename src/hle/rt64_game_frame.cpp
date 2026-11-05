@@ -246,9 +246,7 @@ namespace RT64 {
         float positionDifference = FLT_MAX;
         float orientationDifference = FLT_MAX;
         float screenSpaceDifference = FLT_MAX;
-#   if RT64_MATCH_SCALES
         float scaleDifference = FLT_MAX;
-#   endif
         bool valid = false;
 
         float computeDifference() const {
@@ -273,12 +271,10 @@ namespace RT64 {
                 totalDiff += screenSpaceDifference * ScreenSpaceDiffScale;
             }
 
-#       if RT64_MATCH_SCALES
             const float ScaleDiffScale = 1.0f;
             if (scaleDifference < FLT_MAX) {
                 totalDiff += scaleDifference * ScaleDiffScale;
             }
-#       endif
 
             return totalDiff;
         }
@@ -321,7 +317,6 @@ namespace RT64 {
             (1.0f - hlslpp::dot(hlslpp::normalize(curTransform[1].xyz), hlslpp::normalize(prevTransform[1].xyz))) +
             (1.0f - hlslpp::dot(hlslpp::normalize(curTransform[2].xyz), hlslpp::normalize(prevTransform[2].xyz)));
 
-#   if RT64_MATCH_SCALES
         // And how far apart their scales are, as the ratio of each axis's length, since the orientation's axes are
         // normalized. Parts of one object that a game draws at one place and orientation and only scales apart tied
         // without it, and were paired across, one part's frames between drawn toward another's size and place.
@@ -333,7 +328,6 @@ namespace RT64 {
                 matchResult.scaleDifference += fabsf(logf(curLength / prevLength));
             }
         }
-#   endif
 
         // Compute the difference between the screen-space position of both transforms on their respective projections.
         hlslpp::float4 prevScreenPos = hlslpp::mul(prevTransform[3], prevViewProj);
