@@ -934,17 +934,16 @@ namespace RT64 {
             const uint8_t *fbRAM = &RDRAM[fb->addressStart];
             const FramebufferChange::Type fbChangeType = (fb->lastWriteFmt == G_IM_FMT_DEPTH) ? FramebufferChange::Type::Depth : FramebufferChange::Type::Color;
             FramebufferChange &fbChange = fbChangePool.use(renderWorker, fbChangeType, fb->width, fb->height, shaderLibrary->usesHDR);
-#   if defined(__EMSCRIPTEN__)
             // Each upload takes the next read buffer of the framebuffer's history, which only a workload that draws into
             // the framebuffer starts over. One the CPU writes and no workload draws into took a new one at every check of
             // RAM it changed in, a buffer and an upload buffer of its size each, and on the web the copy of its bytes the
-            // change count compares with: Dinosaur Planet's page grew its heap 9 MB and Chrome's GPU process 25-30 MB a
-            // second until it ran out. Only the newest read buffer is compared with, so the history starts over here too,
-            // unless a render to RAM is still to be read back from one of its buffers.
+            // change count compares with: Dinosaur Planet's desktop build grew its video memory about 20 MB a second, and
+            // its page its heap 9 MB and Chrome's GPU process 25-30 MB a second until it ran out. Only the newest read
+            // buffer is compared with, so the history starts over here too, unless a render to RAM is still to be read back
+            // from one of its buffers.
             if (fb->nativeTarget.writeBufferHistoryIndex >= fb->nativeTarget.writeBufferHistoryCount) {
                 fb->nativeTarget.resetBufferHistory();
             }
-#   endif
             const uint32_t DifferenceFractionNum = 1;
             const uint32_t DifferenceFractionDiv = 4;
             const uint32_t differentPixels = fb->copyRAMToNativeAndChanges(renderWorker, fbChange, fbRAM, 0, fb->height, fb->lastWriteFmt, false, shaderLibrary);
