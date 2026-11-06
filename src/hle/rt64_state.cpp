@@ -2263,6 +2263,16 @@ namespace RT64 {
                             RenderWorkerExecution workerExecution(worker);
                             thread_local std::vector<uint32_t> fbDiscards;
                             const std::scoped_lock lock(ext.presentQueue->screenFbChangePoolMutex);
+#                       if defined(__EMSCRIPTEN__)
+                            // Each upload from RAM takes the next read buffer of the framebuffer's history, which only a
+                            // workload that draws into the framebuffer resets. One the game shows without drawing into it
+                            // (the CPU writes it, or copies the frame it drew elsewhere into it) took a new one at every VI
+                            // its RAM changed, a buffer and an upload buffer of the framebuffer's size each, and on the web
+                            // the copy of its bytes that the CPU's change count compares with: Dinosaur Planet's page grew
+                            // its heap 9 MB and Chrome's GPU process 25-30 MB a second until it ran out. The present
+                            // queue's scratch framebuffer starts its history over before each of its uploads the same way.
+                            screenFb->nativeTarget.resetBufferHistory();
+#                       endif
                             framebufferManager.uploadRAM(worker, &screenFb, 1, ext.presentQueue->screenFbChangePool, RDRAM, false, present.fbOperations, fbDiscards, ext.shaderLibrary);
                             fbDiscards.clear();
 
