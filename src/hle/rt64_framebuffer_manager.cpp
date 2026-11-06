@@ -420,8 +420,8 @@ namespace RT64 {
         // Relative offset of the image start to the framebuffer start.
         const uint32_t offset = addressStart - fb->addressStart;
 
-        // This will be the same size for 4 and 8 byte formats.
-        const uint32_t pixelSize = 1 << fb->siz >> 1;
+        // This will be the same size for 4 and 8 bit formats: one byte, which holds two pixels of a 4-bit one (pixelShift).
+        const uint32_t pixelSize = std::max(1U << fb->siz >> 1, 1U);
 
         // The offset is not aligned to the pixel size. It's not possible to make a direct copy.
         if ((offset % pixelSize) != 0) {
