@@ -3,7 +3,6 @@
 //
 
 #include <algorithm>
-#include <cmath>
 
 #include "common/rt64_math.h"
 
@@ -538,26 +537,8 @@ namespace RT64 {
         thread_local std::vector<MatchCandidate> matchCandidates;
         thread_local std::vector<bool> curScenesMatched;
         thread_local std::vector<bool> prevScenesMatched;
-        auto isCameraFinite = [](const hlslpp::float4x4 &view, const hlslpp::float4x4 &proj) {
-            for (int i = 0; i < 4; i++) {
-                for (int j = 0; j < 4; j++) {
-                    if (!std::isfinite(float(view[i][j])) || !std::isfinite(float(proj[i][j]))) {
-                        return false;
-                    }
-                }
-            }
-
-            return true;
-        };
-
         auto matchScenes = [&](const std::vector<GameScene> &curScenes, const std::vector<GameScene> &prevScenes) {
             // Find the scenes that are the closest match possible.
-            //
-            // A camera that isn't finite (one a game draws a shadow into a texture with can have a projection of NaNs)
-            // differs by NaN from every other, and a NaN compares false both ways: it broke the sort below, and the
-            // greedy pass paired a scene with that camera's while its own match was there, matching its transforms
-            // against the other scene's. A scene with a camera that isn't finite pairs only with another such scene,
-            // in order, never with one that is.
             matchCandidates.clear();
             for (uint32_t i = 0; i < curScenes.size(); i++) {
                 const GameIndices::Projection curFirstProj = curScenes[i].projections[0];
@@ -566,7 +547,6 @@ namespace RT64 {
                 const Projection &curProj = curFbPair.projections[curFirstProj.projectionIndex];
                 const hlslpp::float4x4 &curViewTransform = curWorkload.drawData.viewTransforms[curProj.transformsIndex];
                 const hlslpp::float4x4 &curProjTransform = curWorkload.drawData.projTransforms[curProj.transformsIndex];
-                const bool curFinite = isCameraFinite(curViewTransform, curProjTransform);
                 for (uint32_t j = 0; j < prevScenes.size(); j++) {
                     const GameIndices::Projection prevFirstProj = prevScenes[j].projections[0];
 #if RT64_GAME_FRAME_WORKLOADS
@@ -582,12 +562,7 @@ namespace RT64 {
                     const Projection &prevProj = prevFbPair.projections[prevFirstProj.projectionIndex];
                     const hlslpp::float4x4 &prevViewTransform = prevWorkload.drawData.viewTransforms[prevProj.transformsIndex];
                     const hlslpp::float4x4 &prevProjTransform = prevWorkload.drawData.projTransforms[prevProj.transformsIndex];
-                    if (isCameraFinite(prevViewTransform, prevProjTransform) != curFinite) {
-                        continue;
-                    }
-
-                    const float difference = curFinite ? (matrixDifference(curViewTransform, prevViewTransform) + matrixDifference(curProjTransform, prevProjTransform)) : FLT_MAX;
-                    matchCandidates.emplace_back(i, j, difference);
+                    matchCandidates.emplace_back(i, j, matrixDifference(curViewTransform, prevViewTransform) + matrixDifference(curProjTransform, prevProjTransform));
                 }
             }
 
@@ -595,6 +570,40 @@ namespace RT64 {
             prevScenesMatched.clear();
             curScenesMatched.resize(curScenes.size());
             prevScenesMatched.resize(prevScenes.size());
+
+            // A camera that isn't finite (one a game draws a shadow into a texture with can have a projection of NaNs)
+            // differs by NaN from every other, and a NaN compares false both ways: it broke the sort below, and the
+            // greedy pass paired a scene with that camera's while its own match was there, matching its transforms
+            // against the other scene's. A scene with a camera that isn't finite pairs only with another such scene,
+            // in order, never with one that is.
+            auto isCameraFinite = [&](const GameScene &scene) {
+                const GameIndices::Projection &firstProj = scene.projections[0];
+                const Workload &workload = workloadQueue.workloads[firstProj.workloadIndex];
+                const Projection &proj = workload.fbPairs[firstProj.fbPairIndex].projections[firstProj.projectionIndex];
+                const hlslpp::float4x4 &viewTransform = workload.drawData.viewTransforms[proj.transformsIndex];
+                const hlslpp::float4x4 &projTransform = workload.drawData.projTransforms[proj.transformsIndex];
+                for (int i = 0; i < 4; i++) {
+                    for (int j = 0; j < 4; j++) {
+                        if (!std::isfinite(float(viewTransform[i][j])) || !std::isfinite(float(projTransform[i][j]))) {
+                            return false;
+                        }
+                    }
+                }
+
+                return true;
+            };
+
+            auto pairsAcross = [&](const MatchCandidate &candidate) {
+                return isCameraFinite(curScenes[candidate.curIndex]) != isCameraFinite(prevScenes[candidate.prevIndex]);
+            };
+
+            matchCandidates.erase(std::remove_if(matchCandidates.begin(), matchCandidates.end(), pairsAcross), matchCandidates.end());
+            for (MatchCandidate &candidate : matchCandidates) {
+                if (!std::isfinite(candidate.difference)) {
+                    candidate.difference = FLT_MAX;
+                }
+            }
+
             std::stable_sort(matchCandidates.begin(), matchCandidates.end());
             for (const MatchCandidate &candidate : matchCandidates) {
                 if (curScenesMatched[candidate.curIndex]) {
