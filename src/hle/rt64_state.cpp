@@ -2207,11 +2207,12 @@ namespace RT64 {
 
         const bool presentEarly = !ext.presentQueue->viewRDRAM && (ext.enhancementConfig->presentation.mode == EnhancementConfiguration::Presentation::Mode::PresentEarly);
         const uint32_t screenFbAddress = newVI.fbAddress();
-        const uint32_t shownFbAddress = shownFramebufferAddress(newVI);
         const hlslpp::uint2 screenFbSize = newVI.fbSize();
         const uint8_t screenFbSiz = newVI.fbSiz();
         const bool viVisible = newVI.visible();
         bool viDifferent = false;
+        // Taken here, not beside screenFbAddress, where Jet Force Gemini's page patches in lines of its own.
+        const uint32_t shownFbAddress = shownFramebufferAddress(newVI);
         if (!fromEarlyPresent) {
             // Keep last known screen VI updated.
             viDifferent = (newVI != lastScreenVI);
