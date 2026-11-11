@@ -2211,8 +2211,6 @@ namespace RT64 {
         const uint8_t screenFbSiz = newVI.fbSiz();
         const bool viVisible = newVI.visible();
         bool viDifferent = false;
-        // Taken here, not beside screenFbAddress, where Jet Force Gemini's page patches in lines of its own.
-        const uint32_t shownFbAddress = shownFramebufferAddress(newVI);
         if (!fromEarlyPresent) {
             // Keep last known screen VI updated.
             viDifferent = (newVI != lastScreenVI);
@@ -2225,6 +2223,7 @@ namespace RT64 {
                 viHistory.pushFactor(lastScreenFactorCounter + 1);
                 lastScreenFactorCounter = 0;
 
+                const uint32_t shownFbAddress = shownFramebufferAddress(newVI);
                 bool shownBefore = false;
                 for (const ShownFramebuffer &shown : shownFramebuffers) {
                     shownBefore = shownBefore || ((shown.address == shownFbAddress) && (shown.width == screenFbSize.x) && (shown.siz == screenFbSiz));
@@ -2311,7 +2310,7 @@ namespace RT64 {
 #       if RT64_GAME_FRAME_WORKLOADS
             ext.workloadQueue->presentAdvancing = false;
             if (newVI.visible()) {
-                ext.workloadQueue->presentQueued(present.workloadId, shownFbAddress);
+                ext.workloadQueue->presentQueued(present.workloadId, shownFramebufferAddress(newVI));
             }
 #       endif
 
