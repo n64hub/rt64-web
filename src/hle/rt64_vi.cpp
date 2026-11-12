@@ -100,6 +100,16 @@ namespace RT64 {
             return hlslpp::uint2(0, 0);
         }
 
+        // The rows the game drew, where it drew fewer than the estimate below (shownHeight).
+        if (shownHeight > 0) {
+            VI estimated = *this;
+            estimated.shownHeight = 0;
+            hlslpp::uint2 shown = estimated.fbSize();
+            const uint32_t estimate = shown.y;
+            shown.y = std::min(shownHeight, estimate);
+            return shown;
+        }
+
         hlslpp::uint2 size = { width, 0 };
         
         // In interlaced without deflickering, the stride of the framebuffer is usually double of 
@@ -125,13 +135,6 @@ namespace RT64 {
             const uint32_t Divisor = 4;
             size.y += ExtraRows;
             size.y = lround(float(size.y) / Divisor) * Divisor;
-
-            // The rows the game drew, where it drew fewer (shownHeight).
-            const uint32_t estimate = size.y;
-            if (shownHeight > 0) {
-                size.y = std::min(shownHeight, estimate);
-            }
-
             return size;
         } else {
             return hlslpp::uint2(0, 0);
