@@ -228,10 +228,14 @@ namespace RT64 {
                 if (presentFb->interpolationEnabled) {
                     framesToPresent = frameCounters.count;
                 }
-                else {
-                    lockedWorkloadMutex = true;
-                    ext.sharedResources->workloadMutex.lock();
-                }
+
+                // The target is the manager's, which the workload thread resizes as it draws (RenderTarget::resize() frees its
+                // textures), the frames it interpolates after this one too: held while this frame uses it, as for a frame with
+                // none interpolated, and let go before an interpolated frame is waited for, which that thread draws holding it.
+                // Unheld, a resize as Turok's page let its game go after the boot shaders freed the textures the present had
+                // just taken, and Firefox stopped on a call through the freed texture's wrapper.
+                lockedWorkloadMutex = true;
+                ext.sharedResources->workloadMutex.lock();
 
                 RenderTargetKey colorTargetKey(presentFb->addressStart, presentFb->width, presentFb->siz, Framebuffer::Type::Color);
                 colorTarget = &targetManager.get(colorTargetKey, true);
@@ -308,6 +312,11 @@ namespace RT64 {
         for (int32_t i = 0; i < framesToPresent; i++) {
             uint32_t frameCountersNextPresented = 0;
             if ((framesToPresent > 1) && (usingMSAA || (i > 0))) {
+                if (lockedWorkloadMutex) {
+                    ext.sharedResources->workloadMutex.unlock();
+                    lockedWorkloadMutex = false;
+                }
+
                 // Stall until the interpolated color target is available.
                 const uint32_t targetIndex = usingMSAA ? i : (i - 1);
                 PhaseTimer phaseTimer(this, PhaseInterpolated);
