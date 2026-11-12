@@ -989,6 +989,7 @@ namespace RT64 {
             Framebuffer *fb = framebufferManager.find(it.first);
             if ((fb != nullptr) && it.second.checked && !it.second.cpuWrote) {
                 fb->RAMHash = XXH3_64bits(reinterpret_cast<const uint8_t *>(it.second.words.data()) + (it.first - it.second.start), fb->RAMBytes);
+                fb->RAMHashCopied = true;
             }
         }
 
@@ -2254,6 +2255,7 @@ namespace RT64 {
         screenCpuProfiler.start();
         bool fbChangesMade = false;
         bool screenChangesMade = false;
+        bool screenRAMCopied = false;
         if (newVI.visible()) {
             // See if there's an existing framebuffer that lines up with the VI. If there is, we support reading 
             // CPU changes directly to it and recreating them in the render thread at low resolution.
@@ -2282,11 +2284,15 @@ namespace RT64 {
                         // Only update the hash if it's not a discard.
                         if (present.fbOperations.front().type == FramebufferOperation::Type::WriteChanges) {
                             screenFb->RAMHash = currentHash;
+                            screenFb->RAMHashCopied = false;
                             fbChangesMade = true;
                         }
                         else {
                             present.fbOperations.clear();
                         }
+                    }
+                    else {
+                        screenRAMCopied = screenFb->RAMHashCopied;
                     }
                 }
                 else {
@@ -2301,6 +2307,15 @@ namespace RT64 {
                 memcpy(present.storage.data(), &RDRAM[screenFbAddress], screenFbBytes);
                 uint64_t newScreenHash = XXH3_64bits(present.storage.data(), screenFbBytes);
                 screenChangesMade = (newScreenHash != lastScreenHash);
+#           if defined(__EMSCRIPTEN__)
+                // A shown framebuffer whose RAM changed to what render to RAM copied into it is the frame already shown,
+                // not one the CPU drew: no present and no frame of its own, as with render to RAM off. Counted as one, its
+                // VIs since the swap made a frame of 1, and a game at 30 whose copy landed a VI after its swap (the exact
+                // copy's readback waits 5-6 ms a list on the page) was timed at 60 from the VIs (logicalRateFromFactors()),
+                // with no frame drawn between its own: Turok 2's levels at the display's rate presented 30 a second
+                // against 55-56 with render to RAM off.
+                screenChangesMade = screenChangesMade && !screenRAMCopied;
+#           endif
                 lastScreenHash = newScreenHash;
             }
         }

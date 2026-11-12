@@ -54,6 +54,8 @@ namespace RT64 {
         uint32_t modifiedBytes;
         uint32_t RAMBytes;
         uint64_t RAMHash;
+        // Whether RAMHash is of what render to RAM wrote (hashTracking(), a late copy that landed), not of what the CPU did.
+        bool RAMHashCopied;
         std::array<uint32_t, 4> ditherPatterns;
         TileCopyCache tileCopyCache;
         bool widthChanged;

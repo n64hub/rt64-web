@@ -38,6 +38,7 @@ namespace RT64 {
         modifiedBytes = 0;
         RAMBytes = 0;
         RAMHash = 0;
+        RAMHashCopied = false;
         ditherPatterns.fill(0);
         lastWriteType = Type::None;
         lastWriteFmt = 0;

@@ -959,6 +959,7 @@ namespace RT64 {
 
                 if (updateHashes) {
                     it->second.RAMHash = currentHash;
+                    it->second.RAMHashCopied = false;
                 }
             }
 
@@ -1027,6 +1028,7 @@ namespace RT64 {
         while (it != framebuffers.end()) {
             if ((it->second.maxHeight > 0) && (it->second.RAMBytes > 0)) {
                 it->second.RAMHash = XXH3_64bits(&RDRAM[it->first], it->second.RAMBytes);
+                it->second.RAMHashCopied = true;
             }
 
             it++;
