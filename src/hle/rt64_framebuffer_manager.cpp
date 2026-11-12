@@ -93,7 +93,9 @@ namespace RT64 {
         // keeps the black a console shows below it. The resolution scale and the aspect ratio go by it too (the
         // workload's viFbSize), or under Expand the present would letterbox the two rows' difference. A game that draws
         // its framebuffer to the estimate, as nearly every one does, keeps it.
-        hlslpp::uint2 size = vi.fbSize();
+        VI estimated = vi;
+        estimated.shownHeight = 0;
+        hlslpp::uint2 size = estimated.fbSize();
         const Framebuffer *fb = find(shownAddress(vi));
         if ((size.y > 0) && (fb != nullptr) && (fb->width == size.x) && (fb->siz == vi.fbSiz()) && (fb->drawnHeight > 0)) {
             const float lines = float(vi.vRegion.vEnd - vi.vRegion.vStart) / (2.0f * vi.yScaleFloat() * (float(size.x) / float(vi.width)));

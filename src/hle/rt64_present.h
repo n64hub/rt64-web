@@ -26,7 +26,5 @@ namespace RT64 {
         // The workload the present thread waits for: with RT64_GAME_FRAME_WORKLOADS the last that drew the framebuffer it
         // shows, or else workloadId (State::advancePresent()).
         uint64_t drawnWorkloadId = 0;
-        // The size of the framebuffer the VI shows (FramebufferManager::shownSize()), as the present draws it.
-        hlslpp::uint2 screenFbSize = {};
     };
 };

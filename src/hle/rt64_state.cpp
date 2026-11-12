@@ -1949,7 +1949,7 @@ namespace RT64 {
         }
 
         if (viHistory.top().vi.visible()) {
-            workload.viFbSize = framebufferManager.shownSize(viHistory.top().vi);
+            workload.viFbSize = viHistory.top().vi.fbSize();
         }
 
         // Log and reset profilers.
@@ -2210,16 +2210,23 @@ namespace RT64 {
         const hlslpp::uint2 screenFbSize = newVI.fbSize();
         const uint8_t screenFbSiz = newVI.fbSiz();
         const bool viVisible = newVI.visible();
+
+        // The VI as the screen shows it: its framebuffer as many rows high as the game drew it to, where that is fewer
+        // than VI::fbSize() estimates (FramebufferManager::shownSize()). The present, the workloads' viFbSize through
+        // the VI history and the debugger take it from this copy.
+        VI shownVI = newVI;
+        shownVI.shownHeight = framebufferManager.shownSize(newVI).y;
+
         bool viDifferent = false;
         if (!fromEarlyPresent) {
             // Keep last known screen VI updated.
             viDifferent = (newVI != lastScreenVI);
-            lastScreenVI = newVI;
+            lastScreenVI = shownVI;
 
             // Push to VI history if it's different.
             if (viDifferent && viVisible) {
                 viChangedProfiler.logAndRestart();
-                viHistory.pushVI(newVI, screenFbSize.x);
+                viHistory.pushVI(shownVI, screenFbSize.x);
                 viHistory.pushFactor(lastScreenFactorCounter + 1);
                 lastScreenFactorCounter = 0;
 
@@ -2301,8 +2308,7 @@ namespace RT64 {
         // We only push a new present event to the timeline when it's necessary.
         if (fromEarlyPresent || viDifferent || fbChangesMade || screenChangesMade) {
             // Push a new renderer event to the timeline for presenting this VI.
-            present.screenVI = newVI;
-            present.screenFbSize = framebufferManager.shownSize(newVI);
+            present.screenVI = shownVI;
             advancePresent(present, false);
 #       if RT64_GAME_FRAME_WORKLOADS
             ext.workloadQueue->presentAdvancing = true;
@@ -2433,12 +2439,11 @@ namespace RT64 {
             ext.sharedQueueResources->configurationMutex.unlock();
             RenderViewport viewport;
             RenderRect scissor;
-            const hlslpp::uint2 screenFbSize = framebufferManager.shownSize(lastScreenVI);
-            VIRenderer::getViewportAndScissor(ext.swapChain, lastScreenVI, screenFbSize, resolutionScale, downsampleMultiplier, removeBlackBorders, viewport, scissor);
+            VIRenderer::getViewportAndScissor(ext.swapChain, lastScreenVI, resolutionScale, downsampleMultiplier, removeBlackBorders, viewport, scissor);
 
             // Convert the mouse coordinates to native coordinates.
             hlslpp::float2 screenCursorPos;
-            hlslpp::float2 halfFbSize = hlslpp::float2(screenFbSize) / 2.0f;
+            hlslpp::float2 halfFbSize = hlslpp::float2(lastScreenVI.fbSize()) / 2.0f;
             ImVec2 nativeMousePos = ImGui::GetMousePos();
             const float aspectRatio = resolutionScale.x / resolutionScale.y;
             screenCursorPos.x = ((nativeMousePos.x - (viewport.x + viewport.width / 2)) / (viewport.width / 2)) * aspectRatio;

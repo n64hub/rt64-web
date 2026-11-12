@@ -125,6 +125,13 @@ namespace RT64 {
             const uint32_t Divisor = 4;
             size.y += ExtraRows;
             size.y = lround(float(size.y) / Divisor) * Divisor;
+
+            // The rows the game drew, where it drew fewer (shownHeight).
+            const uint32_t estimate = size.y;
+            if (shownHeight > 0) {
+                size.y = std::min(shownHeight, estimate);
+            }
+
             return size;
         } else {
             return hlslpp::uint2(0, 0);

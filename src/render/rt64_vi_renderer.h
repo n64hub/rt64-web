@@ -28,13 +28,12 @@ namespace RT64 {
             uint32_t textureHeight = 0;
             UserConfiguration::Filtering filtering = UserConfiguration::Filtering::Linear;
             const VI *vi = nullptr;
-            hlslpp::uint2 fbSize = {};
             bool removeBlackBorders = false;
         };
 
         VIRenderer();
         ~VIRenderer();
         void render(const RenderParams &p);
-        static void getViewportAndScissor(const RenderSwapChain *swapChain, const VI &vi, hlslpp::uint2 fbSize, hlslpp::float2 resolutionScale, uint32_t downsamplingScale, bool removeBlackBorders, RenderViewport &viewport, RenderRect &scissor);
+        static void getViewportAndScissor(const RenderSwapChain *swapChain, const VI &vi, hlslpp::float2 resolutionScale, uint32_t downsamplingScale, bool removeBlackBorders, RenderViewport &viewport, RenderRect &scissor);
     };
 };

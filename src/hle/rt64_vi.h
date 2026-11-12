@@ -138,6 +138,10 @@ namespace RT64 {
         XTransform xTransform;
         YTransform yTransform;
 
+        // Not a register: the rows of the framebuffer the screen shows, where the game drew fewer than fbSize()
+        // estimates (FramebufferManager::shownSize(), set by State::updateScreen()), and 0 for the estimate.
+        uint32_t shownHeight = 0;
+
         uint8_t fbSiz() const;
         uint32_t fbAddress() const;
         hlslpp::uint2 fbSize() const;
