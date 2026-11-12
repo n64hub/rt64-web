@@ -38,16 +38,13 @@ namespace RT64 {
             relativeScale = windowSize.x / hdSize.x;
         }
 
-#   if defined(__EMSCRIPTEN__)
         // On whole pixels, the viewport's edges as the scissor's. A target rounded up to whole pixels (Auto's 1708x960 for
-        // 1706.67x960 at a 1600x900 canvas) letterboxes the picture by a fraction of a pixel, and Chrome's WebGPU draws no
-        // row past the viewport's last whole one: a viewport from 0.35 to 899.65 left the canvas's last row black, though
-        // its centre at 899.5 is inside. Rounding moves the picture's edges by half a pixel at most.
+        // 1706.67x960 at a 1600x900 canvas) letterboxes the picture by a fraction of a pixel, and D3D12 draws no row past
+        // the viewport's last whole one, natively as in Chrome's WebGPU: a viewport from 0.35 to 899.65 left a canvas's
+        // last row black, and one from 0.10 to 999.90 a 1920x1000 window's, though their centres at 899.5 and 999.5 are
+        // inside. Rounding moves the picture's edges by half a pixel at most.
         const hlslpp::float2 windowCoordinate = windowCenter + relativeCoordinate * relativeScale;
         return { roundf(float(windowCoordinate.x)), roundf(float(windowCoordinate.y)) };
-#   else
-        return windowCenter + relativeCoordinate * relativeScale;
-#   endif
     }
 
     void VIRenderer::render(const RenderParams &p) {
