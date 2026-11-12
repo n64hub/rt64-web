@@ -175,7 +175,12 @@ namespace RT64 {
         if (present.screenVI.visible()) {
             Framebuffer *viFb = nullptr;
             if (!viewRDRAM) {
-                viFb = fbManager.find(fbManager.shownAddress(present.screenVI));
+                viFb = fbManager.find(present.screenVI.fbAddress());
+
+                // Where the estimate a row before the origin finds none, the framebuffer at the origin is the one shown
+                // (FramebufferManager::shownAddress()). Taken on a line of its own, off the one Jet Force Gemini's page
+                // patches around.
+                viFb = (viFb != nullptr) ? viFb : fbManager.find(fbManager.shownAddress(present.screenVI));
             }
 
             Framebuffer *presentFb = viFb;
