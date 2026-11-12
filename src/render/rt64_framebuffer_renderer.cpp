@@ -63,9 +63,19 @@ namespace RT64 {
                 }
             };
 
+            // A coordinate with an extended origin is snapped to the grid of whole N64 pixels the centered picture
+            // is on, toward its origin's edge: down on the left half, up on the right half, so a coordinate at the
+            // window's right edge isn't left short of it when the width isn't a multiple of the scale (Turok 3's
+            // cutscene bars at 1280x720 ended at 1278). Past the target it is clipped, as the left's is.
             auto correctMisalignment = [=](int32_t coord, uint16_t origin) {
                 if (origin < G_EX_ORIGIN_NONE) {
-                    return int32_t(coord - (coord % std::lround(resScale[1]))) - horizontalMisalignment;
+                    const int32_t alignment = int32_t(std::lround(resScale[1]));
+                    if (origin > G_EX_ORIGIN_CENTER) {
+                        const int32_t remainder = -(coord + horizontalMisalignment) % alignment;
+                        return coord + ((remainder < 0) ? (remainder + alignment) : remainder);
+                    }
+
+                    return int32_t(coord - (coord % alignment)) - horizontalMisalignment;
                 }
                 else {
                     return coord;
@@ -95,8 +105,14 @@ namespace RT64 {
             }
         };
         
+        // As convertFixedRect's: toward the origin's edge, up on the right half.
         auto correctMisalignment = [=](float coord, uint16_t origin) {
             if (origin < G_EX_ORIGIN_NONE) {
+                if (origin > G_EX_ORIGIN_CENTER) {
+                    const float remainder = std::fmod(-(coord + horizontalMisalignment), resScale[1]);
+                    return coord + ((remainder < 0.0f) ? (remainder + resScale[1]) : remainder);
+                }
+
                 return (coord - std::fmod(coord, resScale[1])) - horizontalMisalignment;
             }
             else {
