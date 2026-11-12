@@ -175,7 +175,7 @@ namespace RT64 {
         if (present.screenVI.visible()) {
             Framebuffer *viFb = nullptr;
             if (!viewRDRAM) {
-                viFb = fbManager.find(present.screenVI.fbAddress());
+                viFb = fbManager.find(fbManager.shownAddress(present.screenVI));
             }
 
             Framebuffer *presentFb = viFb;
@@ -204,7 +204,7 @@ namespace RT64 {
                     if (!present.debuggerFramebuffer.view && (presentationMode == EnhancementConfiguration::Presentation::Mode::SkipBuffering)) {
                         for (size_t h = 0; h < viHistory.history.size(); h++) {
                             const VIHistory::Present &entry = viHistory.history[h];
-                            if ((colorFb->addressStart == entry.vi.fbAddress()) && (colorFb->width == entry.fbWidth) && (colorFb->siz == entry.vi.fbSiz()) && entry.vi.compatibleWith(present.screenVI)) {
+                            if ((colorFb->addressStart == fbManager.shownAddress(entry.vi)) &&(colorFb->width == entry.fbWidth) && (colorFb->siz == entry.vi.fbSiz()) && entry.vi.compatibleWith(present.screenVI)) {
                                 presentFb = colorFb;
                                 break;
                             }

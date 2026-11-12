@@ -20,6 +20,7 @@
 #include "rt64_framebuffer.h"
 #include "rt64_framebuffer_changes.h"
 #include "rt64_framebuffer_storage.h"
+#include "rt64_vi.h"
 
 namespace RT64 {
     struct FramebufferOperation {
@@ -182,6 +183,7 @@ namespace RT64 {
         ~FramebufferManager();
         Framebuffer &get(uint32_t address, uint8_t siz, uint32_t width, uint32_t height);
         Framebuffer *find(uint32_t address) const;
+        uint32_t shownAddress(const VI &vi) const;
         Framebuffer *findMostRecentContaining(uint32_t addressStart, uint32_t addressEnd);
         void writeChanges(RenderWorker *renderWorker, const FramebufferChangePool &fbChangePool, const FramebufferOperation &op, RenderTargetManager &targetManager, const ShaderLibrary *shaderLibrary);
         void clearUsedTileCopies();

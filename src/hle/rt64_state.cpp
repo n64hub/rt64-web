@@ -2134,7 +2134,7 @@ namespace RT64 {
 
                 for (size_t h = 0; (h < viHistory.history.size()) && !viPresented; h++) {
                     const VIHistory::Present &entry = viHistory.history[h];
-                    const uint32_t fbAddress = entry.vi.fbAddress();
+                    const uint32_t fbAddress = framebufferManager.shownAddress(entry.vi);
                     const hlslpp::uint2 fbSize = entry.vi.fbSize();
                     const uint8_t fbSiz = entry.vi.fbSiz();
                     if ((colorImg.address == fbAddress) &&
@@ -2223,7 +2223,7 @@ namespace RT64 {
                 viHistory.pushFactor(lastScreenFactorCounter + 1);
                 lastScreenFactorCounter = 0;
 
-                const uint32_t shownFbAddress = shownFramebufferAddress(newVI);
+                const uint32_t shownFbAddress = framebufferManager.shownAddress(newVI);
                 bool shownBefore = false;
                 for (const ShownFramebuffer &shown : shownFramebuffers) {
                     shownBefore = shownBefore || ((shown.address == shownFbAddress) && (shown.width == screenFbSize.x) && (shown.siz == screenFbSiz));
@@ -2251,7 +2251,7 @@ namespace RT64 {
             // See if there's an existing framebuffer that lines up with the VI. If there is, we support reading 
             // CPU changes directly to it and recreating them in the render thread at low resolution.
             RenderWorker *worker = ext.framebufferGraphicsWorker;
-            Framebuffer *screenFb = framebufferManager.find(screenFbAddress);
+            Framebuffer *screenFb = framebufferManager.find(framebufferManager.shownAddress(newVI));
             if (screenFb != nullptr) {
                 // Check compatibility of the high resolution framebuffer with the VI first.
                 // Ensure both the siz and width are the same.
@@ -2310,7 +2310,7 @@ namespace RT64 {
 #       if RT64_GAME_FRAME_WORKLOADS
             ext.workloadQueue->presentAdvancing = false;
             if (newVI.visible()) {
-                ext.workloadQueue->presentQueued(present.workloadId, shownFramebufferAddress(newVI));
+                ext.workloadQueue->presentQueued(present.workloadId, framebufferManager.shownAddress(newVI));
             }
 #       endif
 
@@ -3098,23 +3098,6 @@ namespace RT64 {
         }
     }
 
-    uint32_t State::shownFramebufferAddress(const VI &vi) const {
-        // VI::fbAddress() takes the origin to be a row or two into the framebuffer, as libultra's VI modes put it. A game
-        // with a VI mode of its own can put it at the framebuffer's start (Turok 3's), and then the address is a row before
-        // any framebuffer the game drew: no workload drew what the VI showed, and with RT64_GAME_FRAME_WORKLOADS no
-        // present ended a game frame, so each was held to its limit, four of the game's frames shown as one. The origin
-        // names the framebuffer then, where one of the VI's width and size is there and none is at the estimate.
-        const uint32_t estimate = vi.fbAddress();
-        if ((estimate != vi.origin) && (framebufferManager.find(estimate) == nullptr)) {
-            const Framebuffer *atOrigin = framebufferManager.find(vi.origin);
-            if ((atOrigin != nullptr) && (atOrigin->width == vi.fbSize().x) && (atOrigin->siz == vi.fbSiz())) {
-                return vi.origin;
-            }
-        }
-
-        return estimate;
-    }
-
     void State::advancePresent(Present &present, bool paused) {
         present.presentId = ++presentId;
         present.workloadId = workloadId;
@@ -3126,7 +3109,7 @@ namespace RT64 {
         // minigames do, had the present wait for that frame's workloads too, which ended it there at a wait in the
         // middle (WorkloadQueue::endedGameFrame()), its rest drawn as a frame of its own, or held it and the game with
         // it. A framebuffer no workload has drawn since the VI first showed it waits for the newest, as before.
-        const uint32_t screenFbAddress = shownFramebufferAddress(present.screenVI);
+        const uint32_t screenFbAddress = framebufferManager.shownAddress(present.screenVI);
         const uint32_t screenFbWidth = present.screenVI.fbSize().x;
         const uint8_t screenFbSiz = present.screenVI.fbSiz();
         for (const ShownFramebuffer &shown : shownFramebuffers) {

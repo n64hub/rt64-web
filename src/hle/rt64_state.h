@@ -210,7 +210,6 @@ namespace RT64 {
         void updateMultisampling();
         void inspect();
         void advanceWorkload(Workload &workload, bool paused);
-        uint32_t shownFramebufferAddress(const VI &vi) const;
         void advancePresent(Present &present, bool paused);
         void dpInterrupt();
         void spInterrupt();

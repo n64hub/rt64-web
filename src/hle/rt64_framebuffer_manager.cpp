@@ -61,6 +61,26 @@ namespace RT64 {
         }
     }
 
+    uint32_t FramebufferManager::shownAddress(const VI &vi) const {
+        // VI::fbAddress() takes the origin to be a row or two into the framebuffer, as libultra's VI modes put it. A game
+        // with a VI mode of its own can put it at the framebuffer's start (Turok 2's high resolution modes, Turok 3's),
+        // and then the address is a row before any framebuffer the game drew. The origin names the framebuffer then,
+        // where one of the VI's width and size is there and none is at the estimate. Everything that matches the VI to a
+        // framebuffer goes by it: the present, which otherwise found none and showed the VI's RAM at 1x and 4:3, the
+        // framebuffers the present can skip to and interpolate, early presents, the CPU's writes to the shown framebuffer,
+        // and with RT64_GAME_FRAME_WORKLOADS the present a game frame ends at, which no workload drew otherwise, so each
+        // was held to its limit and four of the game's frames were shown as one.
+        const uint32_t estimate = vi.fbAddress();
+        if ((estimate != vi.origin) && (find(estimate) == nullptr)) {
+            const Framebuffer *atOrigin = find(vi.origin);
+            if ((atOrigin != nullptr) && (atOrigin->width == vi.fbSize().x) && (atOrigin->siz == vi.fbSiz())) {
+                return vi.origin;
+            }
+        }
+
+        return estimate;
+    }
+
     Framebuffer *FramebufferManager::findMostRecentContaining(uint32_t addressStart, uint32_t addressEnd) {
         Framebuffer *mostRecent = nullptr;
         auto it = framebuffers.begin();
