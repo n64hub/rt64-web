@@ -184,6 +184,7 @@ namespace RT64 {
         Framebuffer &get(uint32_t address, uint8_t siz, uint32_t width, uint32_t height);
         Framebuffer *find(uint32_t address) const;
         uint32_t shownAddress(const VI &vi) const;
+        hlslpp::uint2 shownSize(const VI &vi) const;
         Framebuffer *findMostRecentContaining(uint32_t addressStart, uint32_t addressEnd);
         void writeChanges(RenderWorker *renderWorker, const FramebufferChangePool &fbChangePool, const FramebufferOperation &op, RenderTargetManager &targetManager, const ShaderLibrary *shaderLibrary);
         void clearUsedTileCopies();

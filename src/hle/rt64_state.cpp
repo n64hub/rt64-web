@@ -1949,7 +1949,7 @@ namespace RT64 {
         }
 
         if (viHistory.top().vi.visible()) {
-            workload.viFbSize = viHistory.top().vi.fbSize();
+            workload.viFbSize = framebufferManager.shownSize(viHistory.top().vi);
         }
 
         // Log and reset profilers.
@@ -2302,6 +2302,7 @@ namespace RT64 {
         if (fromEarlyPresent || viDifferent || fbChangesMade || screenChangesMade) {
             // Push a new renderer event to the timeline for presenting this VI.
             present.screenVI = newVI;
+            present.screenFbSize = framebufferManager.shownSize(newVI);
             advancePresent(present, false);
 #       if RT64_GAME_FRAME_WORKLOADS
             ext.workloadQueue->presentAdvancing = true;
@@ -2432,11 +2433,12 @@ namespace RT64 {
             ext.sharedQueueResources->configurationMutex.unlock();
             RenderViewport viewport;
             RenderRect scissor;
-            VIRenderer::getViewportAndScissor(ext.swapChain, lastScreenVI, resolutionScale, downsampleMultiplier, removeBlackBorders, viewport, scissor);
+            const hlslpp::uint2 screenFbSize = framebufferManager.shownSize(lastScreenVI);
+            VIRenderer::getViewportAndScissor(ext.swapChain, lastScreenVI, screenFbSize, resolutionScale, downsampleMultiplier, removeBlackBorders, viewport, scissor);
 
             // Convert the mouse coordinates to native coordinates.
             hlslpp::float2 screenCursorPos;
-            hlslpp::float2 halfFbSize = hlslpp::float2(lastScreenVI.fbSize()) / 2.0f;
+            hlslpp::float2 halfFbSize = hlslpp::float2(screenFbSize) / 2.0f;
             ImVec2 nativeMousePos = ImGui::GetMousePos();
             const float aspectRatio = resolutionScale.x / resolutionScale.y;
             screenCursorPos.x = ((nativeMousePos.x - (viewport.x + viewport.width / 2)) / (viewport.width / 2)) * aspectRatio;

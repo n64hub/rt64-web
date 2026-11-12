@@ -38,9 +38,11 @@ namespace RT64 {
         if (fb.widthChanged || fb.sizChanged) {
             fb.maxHeight = height;
             fb.readHeight = 0;
+            fb.drawnHeight = height;
         }
         else {
             fb.maxHeight = std::max(fb.maxHeight, height);
+            fb.drawnHeight = std::max(fb.drawnHeight, height);
         }
 
         fb.height = fb.maxHeight;
@@ -79,6 +81,28 @@ namespace RT64 {
         }
 
         return estimate;
+    }
+
+    hlslpp::uint2 FramebufferManager::shownSize(const VI &vi) const {
+        // VI::fbSize() estimates the framebuffer's height from the VI's lines alone: the lines, two rows more and a
+        // multiple of four, for libultra's modes' origin a row in and a row left at the end for filtering. A game with a
+        // VI mode of its own can draw fewer: Turok 3's shows 220.5 lines of a 284-wide framebuffer it draws 222 rows of,
+        // estimated as 224, and the present spread all 224 across the window, so the two rows it never drew were a black
+        // strip along the bottom (6 rows of a 720-row window). The height is the rows the shown framebuffer has been drawn
+        // to, never more than the estimate nor fewer than the VI's own lines, so a framebuffer drawn only partway down
+        // keeps the black a console shows below it. The resolution scale and the aspect ratio go by it too (the
+        // workload's viFbSize), or under Expand the present would letterbox the two rows' difference. A game that draws
+        // its framebuffer to the estimate, as nearly every one does, keeps it.
+        hlslpp::uint2 size = vi.fbSize();
+        const Framebuffer *fb = find(shownAddress(vi));
+        if ((size.y > 0) && (fb != nullptr) && (fb->width == size.x) && (fb->siz == vi.fbSiz()) && (fb->drawnHeight > 0)) {
+            const float lines = float(vi.vRegion.vEnd - vi.vRegion.vStart) / (2.0f * vi.yScaleFloat() * (float(size.x) / float(vi.width)));
+            const uint32_t estimate = size.y;
+            const uint32_t viLines = std::min(uint32_t(std::ceil(lines)), estimate);
+            size.y = std::clamp(fb->drawnHeight, viLines, estimate);
+        }
+
+        return size;
     }
 
     Framebuffer *FramebufferManager::findMostRecentContaining(uint32_t addressStart, uint32_t addressEnd) {

@@ -376,6 +376,7 @@ namespace RT64 {
                     renderParams.downsamplingScale = 1;
                     renderParams.filtering = filtering;
                     renderParams.vi = &present.screenVI;
+                    renderParams.fbSize = present.screenFbSize;
                     renderParams.removeBlackBorders = removeBlackBorders;
 
                     const bool useDownsampling = (colorTarget->downsampleMultiplier > 1);

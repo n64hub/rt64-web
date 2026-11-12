@@ -34,6 +34,7 @@ namespace RT64 {
         width = 0;
         height = 0;
         maxHeight = 0;
+        drawnHeight = 0;
         modifiedBytes = 0;
         RAMBytes = 0;
         RAMHash = 0;

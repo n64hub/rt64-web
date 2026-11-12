@@ -42,6 +42,8 @@ namespace RT64 {
         uint32_t width;
         uint32_t height;
         uint32_t maxHeight;
+        // The most rows any draw has reached since the framebuffer took its width and size (FramebufferManager::shownSize()).
+        uint32_t drawnHeight;
         uint32_t readHeight;
         NativeTarget nativeTarget;
         std::vector<uint8_t> nativeSwappedRAM;
