@@ -1373,6 +1373,16 @@ namespace RT64 {
 
                     const bool displayRateAboveOriginal = (workload.viOriginalRate > 0) && (workloadConfig.targetRate > workload.viOriginalRate);
                     generateInterpolatedFrames = !workload.paused && displayRateAboveOriginal && !interpolationTargetKey.isEmpty();
+#               if defined(__EMSCRIPTEN__)
+                    // A hidden page presents nothing (PresentQueue::threadLoop()), so nothing holds this thread to the presents
+                    // in flight, and the frames interpolated for presents that are skipped went to the GPU all the same, one per
+                    // slot of the display's rate. Firefox takes whatever a page submits, and on a busy GPU its GPU process queued
+                    // them: Mario Party 1-3's pages, uncapped at 3840x2000 (6 frames a game frame) on an RTX 2070 kept 84-97%
+                    // busy by other work, grew it from 2.1 GB to 9-11 GB while hidden 30 s and drew 0-7 frames a second for
+                    // 25-60 s after they were shown, and Rush 2049's grew to 25.6 GB until WebGPU ran out of memory. So a
+                    // hidden page draws its game's frames only, as at its original rate.
+                    generateInterpolatedFrames = generateInterpolatedFrames && !ext.presentQueue->ext.swapChain->isHidden();
+#               endif
 
                     const bool resetTicks = !generateInterpolatedFrames || (originalRateForTicks != workload.viOriginalRate) || (displayRateForTicks != workloadConfig.targetRate) || !displayRateAboveOriginal;
                     if (resetTicks) {
