@@ -224,12 +224,12 @@ namespace RT64 {
     // where with them in the boot it never had. So the first frame waits only for its own shaders, the panel the page showed for a whole section before the
     // game started is mostly gone, and a level reached after a minute of play is usually built before the game gets
     // there. Where building a pipeline holds up the device (Firefox, setup()), anything built behind the game would
-    // stall its frames, so nothing is: section 0 is built before the game gets past its first frame, a round builds
-    // every shader of its section not yet built, and the game waits for strays too.
+    // stall its frames, so nothing is: section 0 is built before the game's code first runs (prebuildForGame()), a round
+    // builds every shader of its section not yet built, and the game waits for strays too.
     //
-    // A pipeline is built for the WebGPU layout a draw with its pipeline layout resolved (plume_webgpu.h), so section 0
-    // waits for the first frame's draws; where pipelines build in the background (Chrome) that is the draw of nothing
-    // at setup (State::warmUpPipelines()), and the list builds behind the launcher. A round is built on as many threads as the host has cores (2-16), since the
+    // A pipeline is built for the WebGPU layout a draw with its pipeline layout resolved (plume_webgpu.h), so the list
+    // waits for a draw: the draw of nothing (State::warmUpPipelines()), at setup where pipelines build in the background
+    // (Chrome), so that the list builds behind the launcher, and elsewhere just before the game starts. A round is built on as many threads as the host has cores (2-16), since the
     // game waits and the browser's GPU process has nothing else to do, largest first: a shader's WGSL size goes with
     // its build time, and the largest (370 KB against a median of 65 KB) started last would leave the other threads idle
     // while it finished. Rush 2049's 105 took 15.6-16.7 s six at a time in the list's order, and 6.9-7.2 s twelve at a
@@ -336,9 +336,6 @@ namespace RT64 {
                     }
                 }
             }
-            else {
-                startPrebuildRound(0, lock);
-            }
         }
 
         for (uint32_t t = 0; t < threads; t++) {
@@ -351,8 +348,10 @@ namespace RT64 {
                 (RT64PrebuiltShaderSectionCount > 1) ? RT64PrebuiltShaderSections[1].name : "(none)", prebuildBootThreads, threads);
         }
         else {
+            // The pages' play plans wait for this line's "once the game draws", Firefox's word that the list is set up,
+            // so it stays as it was when the round began at the game's first frames (prebuildForGame()).
             printf("RT64: %u prebuilt shaders, %u pipelines, in %u sections, and %u learned; the game waiting for the %u of section %s, built %u at a time once the game draws\n",
-                RT64PrebuiltShaderCount, pipelineCount, RT64PrebuiltShaderSectionCount, uint32_t(prebuildLearned.size()), uint32_t(prebuildRound.size()),
+                RT64PrebuiltShaderCount, pipelineCount, RT64PrebuiltShaderSectionCount, uint32_t(prebuildLearned.size()), uint32_t(prebuildSections[0].size()),
                 RT64PrebuiltShaderSections[0].name, threads);
         }
 #   endif
@@ -464,7 +463,8 @@ namespace RT64 {
             prebuildRoundSize += roundSize(index, dualSource);
         }
 
-        // Section 0's is reported once the game draws (getGPUShader()): nothing the launcher draws uses it.
+        // Section 0's is reported once the game is about to draw (prebuildForGame(), getGPUShader()): nothing the
+        // launcher draws uses it.
         prebuildRoundHeld = !prebuildRound.empty();
         if (prebuildRoundHeld && prebuildDrawn) {
             prebuildTimer.reset();
@@ -621,6 +621,21 @@ namespace RT64 {
         held = buildMissed() || held;
 #   endif
         return held;
+    }
+
+    // Where nothing is built behind the game (Firefox), the round of section 0, the boot, before the game's code first
+    // runs (Application::prepareForGame()), so that the game starts once it is built, its first sound included. A page
+    // whose renderer doesn't call it starts that round at the game's first frames instead, for what they want of it.
+    void RasterShaderCache::prebuildForGame() {
+#   if defined(RT64_PREBUILT_SHADERS)
+        if (specializedShaders || (prebuildCount == 0) || prebuildDrawn.exchange(true)) {
+            return;
+        }
+
+        std::unique_lock<std::mutex> lock(prebuildMutex);
+        startPrebuildRound(0, lock);
+        prebuildChanged.wait(lock, [this]() { return !prebuildRoundHeld; });
+#   endif
     }
 
     // A draw asked for a prebuilt shader that isn't built yet.

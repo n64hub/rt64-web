@@ -108,6 +108,7 @@ namespace RT64 {
         void wantPrebuild(uint64_t shaderHash);
         void reportPrebuild(uint32_t done, uint32_t count, uint64_t sizeDone, uint64_t sizeStarted, uint64_t size);
         bool waitForPrebuild();
+        void prebuildForGame();
         void learnPrebuild();
         void reportMissed(const ShaderDescription &desc);
         bool buildMissed();

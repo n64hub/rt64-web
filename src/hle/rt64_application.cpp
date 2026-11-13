@@ -522,6 +522,7 @@ namespace RT64 {
 
 #   if defined(__EMSCRIPTEN__)
         // Where pipelines build in the background (Chrome), the ubershader's are built before the game draws with them.
+        // Elsewhere (Firefox) the same warm-up is done just before the game starts (prepareForGame()).
         if (device->getCapabilities().backgroundPipelineBuilds) {
             state->warmUpPipelines();
         }
@@ -586,6 +587,30 @@ namespace RT64 {
             state->configurationSaveQueued = false;
         }
     }
+
+#   if defined(__EMSCRIPTEN__)
+    // Before the game's code first runs (N64ModernRuntime's ultramodern::renderer::prepare_for_game()). Where the browser
+    // builds pipelines in line with its other GPU work (Firefox), the prebuilt shaders of the list's first section, the
+    // boot, are built here, and the ubershader's state the warm-up draws with, with the game waiting before it makes a
+    // sound. Built at the game's first frames, as they were, they stopped the game with its sound started, for as long
+    // as they took: 0.1-11.7 s of the first 10 s of sound lost, on 37 pages of 38. Built at setup, they would hold the
+    // launcher's first frame as long. The draw of nothing (State::warmUpPipelines()) resolves the layout the pipelines
+    // are built for, the shader cache's round builds the section (RasterShaderCache::prebuildForGame()), and a round trip
+    // on the device waits until the browser has done all of it, so the game's first frames queue behind none of it.
+    // Where pipelines build in the background (Chrome), the warm-up was at setup and the list builds behind the
+    // launcher, so nothing waits here.
+    void Application::prepareForGame() {
+        if (device->getCapabilities().backgroundPipelineBuilds) {
+            return;
+        }
+
+        state->warmUpPipelines();
+        workloadQueue->waitForWorkloadId(state->workloadId);
+        rasterShaderCache->prebuildForGame();
+        RenderWorker worker(device.get(), "Prepare for game", RenderCommandListType::DIRECT);
+        RenderWorkerExecution execution(&worker);
+    }
+#   endif
 
     void Application::updateScreen() {
 #   if defined(__EMSCRIPTEN__)
