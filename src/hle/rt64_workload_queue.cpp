@@ -1312,11 +1312,12 @@ namespace RT64 {
                 // drawn, below, not here: a present that took them now chose a framebuffer this frame is about to draw, which
                 // the presentation's SkipBuffering shows, and read it while this thread drew it. Turok 2's map, drawn in the
                 // frame's second workload after the level, was missing from 3-10% of the frames shown while it was open.
-                thread_local std::vector<uint32_t> colorVector;
-                thread_local std::unordered_set<uint32_t> colorSet;
+                thread_local std::vector<uint32_t> frameColorImages;
                 {
                     std::scoped_lock<std::mutex> managerLock(ext.sharedResources->managerMutex);
                     FramebufferManager &fbManager = ext.sharedResources->framebufferManager;
+                    std::vector<uint32_t> &colorVector = frameColorImages;
+                    std::unordered_set<uint32_t> &colorSet = ext.sharedResources->colorImageAddressSet;
                     colorVector.clear();
                     colorSet.clear();
                     for (int32_t w = int32_t(frameWorkloadCount) - 1; w >= 0; w--)
@@ -1602,11 +1603,7 @@ namespace RT64 {
 
                     // After one frame is rendered, we indicate the workload has been processed so the present thread can start presenting frames as soon as it can.
                     if (frame == 0) {
-                        {
-                            std::scoped_lock<std::mutex> managerLock(ext.sharedResources->managerMutex);
-                            ext.sharedResources->colorImageAddressVector = colorVector;
-                        }
-
+                        ext.sharedResources->colorImageAddressVector = frameColorImages;
                         threadAdvanceWorkloadId(lastWorkload.workloadId);
                     }
 

@@ -62,6 +62,7 @@ namespace RT64 {
         // Workload to present state.
         uint32_t viOriginalRate = 0;
         std::vector<uint32_t> colorImageAddressVector;
+        std::unordered_set<uint32_t> colorImageAddressSet;
         std::vector<std::unique_ptr<RenderTarget>> interpolatedColorTargets;
         InterpolatedFrameCounters interpolatedFrames[2];
         uint32_t interpolatedFramesIndex = 0;
