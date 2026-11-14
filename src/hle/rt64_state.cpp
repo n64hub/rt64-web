@@ -1892,6 +1892,13 @@ namespace RT64 {
                 fullSyncFramebufferPairTiles(workload, workload.fbPairs[f], loadOpCursor, rdpTileCursor);
             }
 
+            // Without render to RAM nothing of RDRAM is read for the list once its tiles are loaded: what is left is
+            // RT64's own uploads, the wait for the GPU to take them, and the workload's submission. So, as with the late
+            // copy above, if the list ends here the game is told the RDP is done now and goes on meanwhile.
+            if (listEndsAfterFullSync && (ext.app->core.rdpDone != nullptr)) {
+                ext.app->core.rdpDone();
+            }
+
             // Do not render anything, just wait for the data to be uploaded.
             ext.framebufferGraphicsWorker->commandList->begin();
             ext.drawDataUploader->commandListBeforeBarriers(ext.framebufferGraphicsWorker);
