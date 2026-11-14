@@ -877,6 +877,18 @@ namespace RT64 {
     void State::addPendingRAMCopy(Framebuffer *fb, uint32_t rowWidth, uint32_t rowStart, uint32_t rowEnd) {
         pendingRAMCopies.push_back({ fb->addressStart, rowWidth, rowStart, rowEnd });
         keepPendingRAMImage(fb, rowWidth, rowEnd);
+
+        // Only the rows the copy writes are checked for the CPU's writes when it lands: the rows before rowStart can be
+        // memory of the game's own that nothing drew to. Perfect Dark's split screen points the bottom player's depth
+        // image half a screen before the z-buffer, its scissor keeping the draws inside the z-buffer, and the players'
+        // structs below it, which the game writes every tick, dropped that player's whole copy in a list of five.
+        PendingRAMImage &image = pendingRAMImages[fb->addressStart];
+        const uint32_t rowBytes = fb->imageRowBytes(rowWidth);
+        const size_t firstWord = (fb->addressStart + rowStart * rowBytes - image.start) / 4;
+        const size_t endWord = std::min(image.words.size(), size_t(fb->addressStart + rowEnd * rowBytes - image.start + 3) / 4);
+        if (firstWord < endWord) {
+            image.copiedWords.emplace_back(firstWord, endWord);
+        }
     }
 
     void State::keepPendingRAMImage(Framebuffer *fb, uint32_t rowWidth, uint32_t rowEnd) {
@@ -929,11 +941,13 @@ namespace RT64 {
 
         // The game has had the list's completion and runs meanwhile, so it may have reused a framebuffer's memory. Each
         // frame is converted outside RDRAM and written in a word at a time, only where RDRAM still holds what it held
-        // when the list ended: a framebuffer the CPU wrote to before its copy lands keeps all of what it holds, and one
-        // the CPU writes to while its copy lands keeps every word the CPU wrote, the copy stopping there. Either way
-        // the next list sees the framebuffer as changed, as it would any other change the CPU made. A word the CPU
-        // wrote with the value it already held can't be told from one left alone, and gets the frame: a game whose
-        // reuse of a framebuffer's memory relies on that (zeroes written over zeroes) can't take the copy late.
+        // when the list ended: a framebuffer the CPU wrote to before its copy lands, in the rows its copies write,
+        // keeps all of what it holds (a write to its other rows, which no copy changes, is left as it is and lands
+        // the copy), and one the CPU writes to while its copy lands keeps every word the CPU wrote, the copy stopping
+        // there. Either way the next list sees the framebuffer as changed, as it would any other change the CPU made. A
+        // word the CPU wrote with the value it already held can't be told from one left alone, and gets the frame: a
+        // game whose reuse of a framebuffer's memory relies on that (zeroes written over zeroes) can't take the copy
+        // late.
         auto reportCpuWrite = [this](uint32_t address, bool whileLanding) {
             lateRAMCopyCpuWrites++;
             const uint32_t n = lateRAMCopyCpuWrites;
@@ -955,7 +969,13 @@ namespace RT64 {
             uint32_t *ramWords = reinterpret_cast<uint32_t *>(&RDRAM[image.start]);
             if (!image.checked) {
                 image.checked = true;
-                image.cpuWrote = (memcmp(ramWords, image.words.data(), image.words.size() * 4) != 0);
+                for (const auto &range : image.copiedWords) {
+                    if (memcmp(&ramWords[range.first], &image.words[range.first], (range.second - range.first) * 4) != 0) {
+                        image.cpuWrote = true;
+                        break;
+                    }
+                }
+
                 if (image.cpuWrote) {
                     reportCpuWrite(copy.address, false);
                 }

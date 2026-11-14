@@ -113,11 +113,12 @@ namespace RT64 {
         };
 
         // For each framebuffer with a pending copy, by its address: the words of RDRAM it covers (from a word-aligned
-        // start) as they were when the list ended, with each copy written in as it lands, and whether the CPU has
-        // written to them since.
+        // start) as they were when the list ended, with each copy written in as it lands, the words its copies write
+        // (from and to, indices into words), and whether the CPU has written to those since.
         struct PendingRAMImage {
             uint32_t start = 0;
             std::vector<uint32_t> words;
+            std::vector<std::pair<size_t, size_t>> copiedWords;
             bool checked = false;
             bool cpuWrote = false;
         };
