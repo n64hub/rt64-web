@@ -194,7 +194,14 @@ namespace RT64 {
             }
             
             if ((presentFb != nullptr) && (viFb != nullptr)) {
-                for (uint32_t colorAddress : ext.sharedResources->colorImageAddressVector) {
+                // A copy, taken under the lock the workload thread replaces them under once a frame is drawn.
+                thread_local std::vector<uint32_t> colorImageAddresses;
+                {
+                    std::scoped_lock<std::mutex> managerLock(ext.sharedResources->managerMutex);
+                    colorImageAddresses = ext.sharedResources->colorImageAddressVector;
+                }
+
+                for (uint32_t colorAddress : colorImageAddresses) {
                     Framebuffer *colorFb = fbManager.find(colorAddress);
                     if (colorFb == nullptr) {
                         continue;
