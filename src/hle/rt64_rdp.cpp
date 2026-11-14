@@ -1259,11 +1259,24 @@ namespace RT64 {
         const FixedRect &scissorRect = state->rdp->scissorRectStack[scissorStackSize - 1];
         const bool fixRectLR = state->ext.enhancementConfig->rect.fixRectLR;
         if (!scissorRect.isNull() && fixRectLR) {
-            if ((abs(scissorRect.lrx - lrx) <= 4) && (ulx < scissorRect.lrx)) {
+#       if RT64_KEEP_THIN_RECTS
+            // A rect a pixel wide or tall is one column or row of something drawn a line at a time, not a rect meant
+            // to reach the scissor's edge: stretched, it draws a second line from texels past what the game loaded.
+            // Perfect Dark copies the framebuffer back a row at a time for its blurs and night vision, and its second
+            // to last row, ending a pixel above the scissor, drew the last row too from TMEM's next line, which holds
+            // what an earlier load left: specks every 32 pixels above the view's bottom, made stronger by the blur
+            // feeding the front buffer back into itself.
+            const bool thinX = ((lrx - ulx) <= 4);
+            const bool thinY = ((lry - uly) <= 4);
+#       else
+            const bool thinX = false;
+            const bool thinY = false;
+#       endif
+            if (!thinX && (abs(scissorRect.lrx - lrx) <= 4) && (ulx < scissorRect.lrx)) {
                 lrx = scissorRect.lrx;
             }
 
-            if ((abs(scissorRect.lry - lry) <= 4) && (uly < scissorRect.lry)) {
+            if (!thinY && (abs(scissorRect.lry - lry) <= 4) && (uly < scissorRect.lry)) {
                 lry = scissorRect.lry;
             }
         }
@@ -1390,11 +1403,11 @@ namespace RT64 {
 
 #   if defined(__EMSCRIPTEN__)
         // Fix LR with Scissor can stretch a rectangle by a row the game doesn't draw, and that row samples past a
-        // framebuffer row's tile copy (FramebufferManager::checkRowTileCopy), which then can't be used. Perfect Dark's
-        // night vision copies the framebuffer a row at a time and its second to last row ends a pixel above the scissor:
-        // that row's texture came from TMEM instead, one wait a frame for the GPU and the framebuffers back in RAM. A
-        // row's tile copy is judged by the game's own rectangle; the added row samples past the copy, as it sampled past
-        // the row loaded in TMEM.
+        // framebuffer row's tile copy (FramebufferManager::checkRowTileCopy), which then can't be used: the texture
+        // would come from TMEM instead, one wait a frame for the GPU and the framebuffers back in RAM. A rect one row
+        // tall isn't stretched (RT64_KEEP_THIN_RECTS, on here), but a taller one copied from a few rows can be. A row's
+        // tile copy is judged by the game's own rectangle; the added row samples past the copy, as it sampled past the
+        // rows loaded in TMEM.
         if ((lry != gameLry) && !flip && (dtdy > 0)) {
             const FixedRect gameRect(drawRect.ulx, drawRect.uly, drawRect.lrx, gameLry);
             if (!gameRect.isEmpty()) {
