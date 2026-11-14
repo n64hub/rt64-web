@@ -84,6 +84,11 @@ namespace RT64 {
         pushConstants.textureResolution = { float(p.textureWidth), float(p.textureHeight) };
         pushConstants.gamma = p.vi->gamma();
 
+        // The rows before the VI's origin, which a console never shows, as a fraction of the picture's height: the shader
+        // draws them as the origin's row (VIRenderer::RenderParams::rowsBeforeOrigin).
+        const uint32_t viFbHeight = p.vi->fbSize().y;
+        pushConstants.originTop = (viFbHeight > p.rowsBeforeOrigin) ? (float(p.rowsBeforeOrigin) / float(viFbHeight)) : 0.0f;
+
         p.commandList->setPipeline(shader->pipeline.get());
         p.commandList->setGraphicsPipelineLayout(shader->pipelineLayout.get());
         p.commandList->setGraphicsDescriptorSet(descriptorSet->get(), 0);

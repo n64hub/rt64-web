@@ -29,6 +29,9 @@ namespace RT64 {
             UserConfiguration::Filtering filtering = UserConfiguration::Filtering::Linear;
             const VI *vi = nullptr;
             bool removeBlackBorders = false;
+
+            // The framebuffer's rows before the VI's origin (VI::rowsBeforeOrigin()), drawn as the origin's row.
+            uint32_t rowsBeforeOrigin = 0;
         };
 
         VIRenderer();

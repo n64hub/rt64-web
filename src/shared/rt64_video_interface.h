@@ -13,6 +13,7 @@ namespace interop {
         float2 videoResolution;
         float2 textureResolution;
         float gamma;
+        float originTop;
     };
 #ifdef HLSL_CPU
 };

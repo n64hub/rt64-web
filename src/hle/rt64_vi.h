@@ -155,6 +155,7 @@ namespace RT64 {
         bool compatibleWith(const VI &vi) const;
         bool visible() const;
         bool operator!=(const VI &rhs) const;
+        uint32_t rowsBeforeOrigin(uint32_t fbAddress) const;
     };
 
     struct VIHistory {

@@ -63,6 +63,21 @@ namespace RT64 {
             (yTransform.word != rhs.yTransform.word);
     }
 
+    uint32_t VI::rowsBeforeOrigin(uint32_t fbAddress) const {
+        // The rows of a framebuffer at fbAddress that come before the VI's origin, which the VI never shows: libultra's
+        // modes put the origin a row in (fbAddress() estimates the framebuffer a row before it, two on an interlaced
+        // field), and a game can keep data there, as F-Zero X keeps an arena's first bytes at the start of its third
+        // framebuffer. The present draws the framebuffer from its first row, so they are counted for it to leave out.
+        const uint8_t siz = fbSiz();
+        const uint32_t fbWidth = fbSize().x;
+        if ((siz < G_IM_SIZ_16b) || (fbWidth == 0) || (origin <= fbAddress)) {
+            return 0;
+        }
+
+        const uint32_t rowBytes = fbWidth << (siz - 1);
+        return std::min((origin - fbAddress) / rowBytes, 2U);
+    }
+
     uint8_t VI::fbSiz() const {
         switch (status.type) {
         case VI_STATUS_TYPE_16_BIT:

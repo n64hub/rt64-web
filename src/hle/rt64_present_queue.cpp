@@ -140,6 +140,7 @@ namespace RT64 {
         }
 
         RenderTarget *colorTarget = nullptr;
+        uint32_t rowsBeforeOrigin = 0;
         int32_t framesToPresent = 1;
         bool lockedWorkloadMutex = false;
 #   if RT64_GAME_FRAME_WORKLOADS
@@ -246,6 +247,9 @@ namespace RT64 {
 
                 RenderTargetKey colorTargetKey(presentFb->addressStart, presentFb->width, presentFb->siz, Framebuffer::Type::Color);
                 colorTarget = &targetManager.get(colorTargetKey, true);
+
+                // A framebuffer the game drew is laid out as the one at the VI, a framebuffer the debugger shows is shown whole.
+                rowsBeforeOrigin = present.debuggerFramebuffer.view ? 0 : present.screenVI.rowsBeforeOrigin(viFb->addressStart);
                 if (!colorTarget->isEmpty()) {
                     // If a depth framebuffer is about to be shown, convert it to color.
                     if (presentFb->isLastWriteDifferent(Framebuffer::Type::Color)) {
@@ -268,6 +272,7 @@ namespace RT64 {
             }
             else {
                 uint32_t fbAddress = present.screenVI.fbAddress();
+                rowsBeforeOrigin = present.screenVI.rowsBeforeOrigin(fbAddress);
 
                 // Use a scratch framebuffer to upload the RAM to the render target.
                 hlslpp::uint2 fbSize = present.screenVI.fbSize();
@@ -377,6 +382,7 @@ namespace RT64 {
                     renderParams.filtering = filtering;
                     renderParams.vi = &present.screenVI;
                     renderParams.removeBlackBorders = removeBlackBorders;
+                    renderParams.rowsBeforeOrigin = rowsBeforeOrigin;
 
                     const bool useDownsampling = (colorTarget->downsampleMultiplier > 1);
                     if (useDownsampling) {
