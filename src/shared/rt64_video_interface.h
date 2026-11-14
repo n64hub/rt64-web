@@ -10,10 +10,10 @@
 namespace interop {
 #endif
     struct VideoInterfaceCB {
+        float2 upperLeft; // where the area the VI shows starts in the texture: below the rows before its origin
         float2 videoResolution;
         float2 textureResolution;
         float gamma;
-        float originTop;
     };
 #ifdef HLSL_CPU
 };

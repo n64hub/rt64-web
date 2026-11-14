@@ -16,6 +16,8 @@ namespace RT64 {
         const RenderSampler *descriptorSetSampler = nullptr;
 
         struct RenderParams {
+            // The framebuffer's rows before the VI's origin (VI::rowsBeforeOrigin()), drawn as the origin's row.
+            uint32_t rowsBeforeOrigin = 0;
             RenderDevice *device = nullptr;
             RenderCommandList *commandList = nullptr;
             RenderTexture *texture = nullptr;
@@ -29,9 +31,6 @@ namespace RT64 {
             UserConfiguration::Filtering filtering = UserConfiguration::Filtering::Linear;
             const VI *vi = nullptr;
             bool removeBlackBorders = false;
-
-            // The framebuffer's rows before the VI's origin (VI::rowsBeforeOrigin()), drawn as the origin's row.
-            uint32_t rowsBeforeOrigin = 0;
         };
 
         VIRenderer();

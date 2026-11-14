@@ -11,6 +11,9 @@ SamplerState gSampler : register(s2);
 // Limit texture sampling to the area the VI can sample of the texture.
 
 float4 SampleInput(float2 uv) {
+    // The rows before the VI's origin are drawn as its first row: the VI never shows them, and a game can keep data there
+    // (VI::rowsBeforeOrigin()). Repeating the row below keeps the picture's size and its pixels where they were.
+    uv = max(uv, gConstants.upperLeft + float2(0.5f, 0.5f) / gConstants.textureResolution);
 #ifdef WEBGPU
     // WebGPU has no border addressing, and plume clamps it to the edge, so where the VI shows more lines or columns than
     // the target has (a framebuffer the game draws only partway down) the target's last row would repeat to the
@@ -20,13 +23,8 @@ float4 SampleInput(float2 uv) {
     const float2 LowerRight = gConstants.videoResolution / gConstants.textureResolution;
 #endif
     const float2 HalfPixel = float2(0.5f, 0.5f) / gConstants.textureResolution;
-
-    // The rows before the VI's origin are drawn as its first row: the VI never shows them, and a game can keep data there
-    // (VI::rowsBeforeOrigin()). Repeating the row below keeps the picture's size and its pixels where they were.
-    const float OriginTop = gConstants.originTop * gConstants.videoResolution.y / gConstants.textureResolution.y;
-    const float2 UpperLeft = float2(0.0f, OriginTop) + HalfPixel;
     float2 outsideBorder = step(LowerRight, uv);
-    float4 sampledColor = gInput.SampleLevel(gSampler, clamp(uv, UpperLeft, LowerRight - HalfPixel), 0);
+    float4 sampledColor = gInput.SampleLevel(gSampler, clamp(uv, HalfPixel, LowerRight - HalfPixel), 0);
     float4 gammaCorrectedColor = pow(sampledColor, gConstants.gamma);
     gammaCorrectedColor.rgb *= max(1.0f - outsideBorder.x - outsideBorder.y, 0.0f);
     gammaCorrectedColor.a = 1.0f;

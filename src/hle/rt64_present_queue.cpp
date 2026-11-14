@@ -139,8 +139,10 @@ namespace RT64 {
             targetRate = pacedRate;
         }
 
-        RenderTarget *colorTarget = nullptr;
+        // The rows of the shown framebuffer before the VI's origin, which the VI renderer draws as the origin's row.
         uint32_t rowsBeforeOrigin = 0;
+
+        RenderTarget *colorTarget = nullptr;
         int32_t framesToPresent = 1;
         bool lockedWorkloadMutex = false;
 #   if RT64_GAME_FRAME_WORKLOADS
@@ -247,9 +249,6 @@ namespace RT64 {
 
                 RenderTargetKey colorTargetKey(presentFb->addressStart, presentFb->width, presentFb->siz, Framebuffer::Type::Color);
                 colorTarget = &targetManager.get(colorTargetKey, true);
-
-                // A framebuffer the game drew is laid out as the one at the VI, a framebuffer the debugger shows is shown whole.
-                rowsBeforeOrigin = present.debuggerFramebuffer.view ? 0 : present.screenVI.rowsBeforeOrigin(viFb->addressStart);
                 if (!colorTarget->isEmpty()) {
                     // If a depth framebuffer is about to be shown, convert it to color.
                     if (presentFb->isLastWriteDifferent(Framebuffer::Type::Color)) {
@@ -269,10 +268,12 @@ namespace RT64 {
                 if (!present.paused && (viHistory.top().vi != present.screenVI)) {
                     viHistory.pushVI(present.screenVI, viFb->width);
                 }
+
+                // A framebuffer the game drew is laid out as the one at the VI, a framebuffer the debugger shows is shown whole.
+                rowsBeforeOrigin = present.debuggerFramebuffer.view ? 0 : present.screenVI.rowsBeforeOrigin(viFb->addressStart);
             }
             else {
                 uint32_t fbAddress = present.screenVI.fbAddress();
-                rowsBeforeOrigin = present.screenVI.rowsBeforeOrigin(fbAddress);
 
                 // Use a scratch framebuffer to upload the RAM to the render target.
                 hlslpp::uint2 fbSize = present.screenVI.fbSize();
@@ -291,6 +292,7 @@ namespace RT64 {
                 colorTarget->downsampleMultiplier = 1;
 
                 scratchFb.nativeTarget.resetBufferHistory();
+                rowsBeforeOrigin = present.screenVI.rowsBeforeOrigin(fbAddress);
 
                 {
                     RenderWorkerExecution workerExecution(ext.presentGraphicsWorker);
@@ -372,6 +374,7 @@ namespace RT64 {
                 
                 VIRenderer::RenderParams renderParams;
                 if (colorTarget != nullptr) {
+                    renderParams.rowsBeforeOrigin = rowsBeforeOrigin;
                     renderParams.device = ext.device;
                     renderParams.commandList = commandList;
                     renderParams.swapChain = ext.swapChain;
@@ -382,7 +385,6 @@ namespace RT64 {
                     renderParams.filtering = filtering;
                     renderParams.vi = &present.screenVI;
                     renderParams.removeBlackBorders = removeBlackBorders;
-                    renderParams.rowsBeforeOrigin = rowsBeforeOrigin;
 
                     const bool useDownsampling = (colorTarget->downsampleMultiplier > 1);
                     if (useDownsampling) {
