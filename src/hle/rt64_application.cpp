@@ -127,14 +127,17 @@ namespace RT64 {
         }
 #   endif
 
-        // Create the application window.
-        const char *windowTitle = "RT64";
-        appWindow = std::make_unique<ApplicationWindow>();
-        if (core.window != RenderWindow{}) {
-            appWindow->setup(core.window, this, threadId);
-        }
-        else {
-            appWindow->setup(windowTitle, this);
+        // Create the application window. A device replaced keeps the window it drew in: made again, the window's
+        // SDL event filter would chain to the filter of the one it replaced, which is freed.
+        if (!replacingDevice) {
+            const char *windowTitle = "RT64";
+            appWindow = std::make_unique<ApplicationWindow>();
+            if (core.window != RenderWindow{}) {
+                appWindow->setup(core.window, this, threadId);
+            }
+            else {
+                appWindow->setup(windowTitle, this);
+            }
         }
 
         // Detect refresh rate from the display the window is located at.
@@ -613,11 +616,9 @@ namespace RT64 {
 #   endif
 
     void Application::updateScreen() {
-#   if defined(__EMSCRIPTEN__)
         if (device->isLost()) {
             replaceLostDevice();
         }
-#   endif
 
         appWindow->sdlCheckFilterInstallation();
         screenApiProfiler.logAndRestart();
@@ -819,32 +820,39 @@ namespace RT64 {
         device.reset();
         renderInterface.reset();
 
-        FileDialog::finish();
+        // The file dialogs stay for the device that replaces this one, as the window does (setup()).
+        if (!replacingDevice) {
+            FileDialog::finish();
+        }
     }
 
-#   if defined(__EMSCRIPTEN__)
-    // A page's WebGPU device is lost to a driver update or reset, the browser's GPU process crashing or a laptop
-    // switching GPUs, and everything made on it with it. Once the page has a new one (RenderDevice::isLost()), the screen
-    // update before the next frame's lists destroys everything as end() does and sets it all up again on a new device as
-    // setup() does: textures, targets, pipelines and the prebuilt shaders, which the game waits for again, the swap chain.
-    // The game goes on from the same RDRAM, so nothing it has drawn has to be drawn again but what the next frames draw.
-    // The configuration is kept, and so is what a caller set on the state; a render hook's objects are made again with
-    // the replace device hook (rt64_render_hooks.h), not the deinit and init hooks.
+    // A device is lost to a driver's fault, reset or update, the GPU taking too long (a TDR on Windows) or going away, a
+    // page's browser's GPU process crashing or a laptop switching GPUs, and everything made on it with it. Once the
+    // device says so (RenderDevice::isLost(): a WebGPU device once the page has a new one, a removed D3D12 device, a
+    // Vulkan device that returned VK_ERROR_DEVICE_LOST), the screen update before the next frame's lists destroys
+    // everything as end() does and sets it all up again on a new device as setup() does: the graphics API's interface
+    // (a new DXGI factory, which enumerates the adapters again after a TDR), textures, targets, pipelines and the
+    // prebuilt shaders, which the game waits for again, the swap chain. The threads that ran into the lost device in
+    // between went on: its buffers map() to nullptr, and what would have been written into one is skipped. The game goes
+    // on from the same RDRAM, so nothing it has drawn has to be drawn again but what the next frames draw. The
+    // configuration and the window are kept, and so is what a caller set on the state; a render hook's objects are made
+    // again with the replace device hook (rt64_render_hooks.h), not the deinit and init hooks. PLUME_LOSE_DEVICE_AFTER
+    // tests it on a desktop build (plume's plume_lost_device_test.h).
     void Application::replaceLostDevice() {
-        fprintf(stderr, "RT64: the WebGPU device was lost; starting again on a new one.\n");
+        fprintf(stderr, "RT64: the graphics device was lost; starting again on a new one.\n");
         std::atomic<uint32_t> *displayListReads = state->displayListReads;
         replacingDevice = true;
         end();
         const SetupResult result = setup(setupThreadId);
         replacingDevice = false;
         if (result != SetupResult::Success) {
-            fprintf(stderr, "RT64 could not start again on a new WebGPU device (%d).\n", int(result));
+            fprintf(stderr, "RT64 could not start again on a new graphics device (%d).\n", int(result));
             abort();
         }
 
         state->displayListReads = displayListReads;
+        fprintf(stderr, "RT64: going on with the new device.\n");
     }
-#   endif
 
     bool Application::loadConfiguration() {
         if (!appConfig.useConfigurationFile || userPaths.isEmpty()) {

@@ -202,6 +202,12 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
             const uint32_t alignedRowPitch = (rowPitch + 255) & ~255U;
             std::unique_ptr<RenderBuffer> uploadBuffer = device->createBuffer(RenderBufferDesc::UploadBuffer(uint64_t(alignedRowPitch) * height));
             uint8_t *uploadData = reinterpret_cast<uint8_t *>(uploadBuffer->map());
+
+            // A lost device's buffers map to nothing (Application::replaceLostDevice()).
+            if (uploadData == nullptr) {
+                return;
+            }
+
             for (uint32_t row = 0; row < height; row++) {
                 memcpy(uploadData + uint64_t(alignedRowPitch) * row, pixels + uint64_t(pitch) * row, rowPitch);
             }
@@ -331,6 +337,20 @@ fn PSMain(input: VertexOutput) -> @location(0) vec4<f32> {
 
             ImDrawVert *vertexData = reinterpret_cast<ImDrawVert *>(vertexBuffer->map());
             ImDrawIdx *indexData = reinterpret_cast<ImDrawIdx *>(indexBuffer->map());
+
+            // A lost device's buffers map to nothing (Application::replaceLostDevice()): nothing is drawn.
+            if ((vertexData == nullptr) || (indexData == nullptr)) {
+                if (vertexData != nullptr) {
+                    vertexBuffer->unmap();
+                }
+
+                if (indexData != nullptr) {
+                    indexBuffer->unmap();
+                }
+
+                return;
+            }
+
             for (int i = 0; i < drawData->CmdListsCount; i++) {
                 const ImDrawList *drawList = drawData->CmdLists[i];
                 memcpy(vertexData, drawList->VtxBuffer.Data, drawList->VtxBuffer.Size * sizeof(ImDrawVert));

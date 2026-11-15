@@ -557,10 +557,13 @@ namespace RT64 {
 
         dstTexture->memorySize = alignedRowPitch * height;
 
+        // A lost device's buffers map to nothing (Application::replaceLostDevice()): the texture is left as it is.
         uint8_t *dstData = reinterpret_cast<uint8_t *>(dstUploadResource->map());
-        const uint8_t *srcData = reinterpret_cast<const uint8_t *>(bytes);
-        memcpyRows(dstData, alignedRowPitch, srcData, rowPitch, height);
-        dstUploadResource->unmap();
+        if (dstData != nullptr) {
+            const uint8_t *srcData = reinterpret_cast<const uint8_t *>(bytes);
+            memcpyRows(dstData, alignedRowPitch, srcData, rowPitch, height);
+            dstUploadResource->unmap();
+        }
 
         uint32_t alignedRowWidth = alignedRowPitch / RenderFormatSize(dstTexture->format);
         commandList->barriers(RenderBarrierStage::COPY, RenderTextureBarrier(dstTexture->texture.get(), RenderTextureLayout::COPY_DEST));
@@ -799,6 +802,12 @@ namespace RT64 {
 
         // Copy each mipmap into the buffer with the correct padding applied.
         uint8_t *dstData = reinterpret_cast<uint8_t *>(dstUploadResource->map());
+
+        // A lost device's buffers map to nothing (Application::replaceLostDevice()).
+        if (dstData == nullptr) {
+            return false;
+        }
+
         memset(dstData, 0, totalSize);
         for (uint32_t mip = 0; mip < desc.mipLevels; mip++) {
             uint32_t mipOffset = mipmapOffsets[mip];
@@ -831,6 +840,12 @@ namespace RT64 {
 
         // Upload the entire file to the GPU to copy data from it directly.
         void *uploadData = dstUploadResource->map();
+
+        // A lost device's buffers map to nothing (Application::replaceLostDevice()).
+        if (uploadData == nullptr) {
+            return false;
+        }
+
         memcpy(uploadData, bytes, byteCount);
         dstUploadResource->unmap();
 
@@ -1087,9 +1102,12 @@ namespace RT64 {
                     newTexture->decodeTMEM = upload.decodeTMEM;
 
                     if (!upload.bytesTMEM.empty()) {
+                        // A lost device's buffers map to nothing (Application::replaceLostDevice()).
                         void *dstData = tmemUploadResources[i]->map();
-                        memcpy(dstData, upload.bytesTMEM.data(), upload.bytesTMEM.size());
-                        tmemUploadResources[i]->unmap();
+                        if (dstData != nullptr) {
+                            memcpy(dstData, upload.bytesTMEM.data(), upload.bytesTMEM.size());
+                            tmemUploadResources[i]->unmap();
+                        }
                     }
 
                     beforeCopyBarriers.emplace_back(newTexture->tmem.get(), RenderTextureLayout::COPY_DEST);

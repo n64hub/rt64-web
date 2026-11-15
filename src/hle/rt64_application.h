@@ -169,9 +169,7 @@ namespace RT64 {
         void destroyShaderCache();
         void updateMultisampling();
         void end();
-#   if defined(__EMSCRIPTEN__)
         void replaceLostDevice();
-#   endif
         bool loadConfiguration();
         bool saveConfiguration();
         bool checkDirectoryCreated(const std::filesystem::path &path);

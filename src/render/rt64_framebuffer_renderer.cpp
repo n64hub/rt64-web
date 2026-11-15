@@ -1420,9 +1420,12 @@ namespace RT64 {
         }
 
         Framebuffer &framebuffer = framebufferVector[framebufferCount - 1];
+        // A lost device's buffer maps to nothing (Application::replaceLostDevice()).
         void *paramBufferBytes = framebuffer.paramsBuffer->map();
-        memcpy(paramBufferBytes, &fbParams, sizeof(interop::FramebufferParams));
-        framebuffer.paramsBuffer->unmap();
+        if (paramBufferBytes != nullptr) {
+            memcpy(paramBufferBytes, &fbParams, sizeof(interop::FramebufferParams));
+            framebuffer.paramsBuffer->unmap();
+        }
 
 #   if RT64_WGSL
         // Only the raytracing shaders read the background color, and WebGPU refuses a pass that draws into a texture

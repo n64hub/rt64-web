@@ -161,9 +161,13 @@ namespace RT64 {
         }
 #   endif
 
+        // A lost device's buffers map to nothing (Application::replaceLostDevice()): nothing is uploaded, and every pixel
+        // counts as modified.
         void *dstData = readBuffer.nativeUploadBuffer->map();
-        memcpy(dstData, data, bufferSize);
-        readBuffer.nativeUploadBuffer->unmap();
+        if (dstData != nullptr) {
+            memcpy(dstData, data, bufferSize);
+            readBuffer.nativeUploadBuffer->unmap();
+        }
 
         // On WebGPU, reading the count back makes the list wait for the GPU and the page's thread (10-90 ms on the
         // first list of a new screen, 2-4 ms a framebuffer after). When the CPU knows what the previous buffer holds
@@ -276,8 +280,13 @@ namespace RT64 {
             worker->commandList->begin();
             RenderRange readRange(0, sizeof(uint32_t));
             uint32_t *readbackData = reinterpret_cast<uint32_t *>(changeReadbackBuffer->map(0, &readRange));
-            modifiedCount = *readbackData;
-            changeReadbackBuffer->unmap();
+            if (readbackData != nullptr) {
+                modifiedCount = *readbackData;
+                changeReadbackBuffer->unmap();
+            }
+            else {
+                modifiedCount = width * height;
+            }
         }
         // Consider all pixels as modified.
         else if (!hasCurrentResource) {
@@ -435,6 +444,12 @@ namespace RT64 {
         const uint32_t bufferSize = getNativeSize(width, rowEnd - rowStart, siz);
         RenderRange readRange = { bufferOffset, bufferOffset + bufferSize };
         uint8_t *readbackData = reinterpret_cast<uint8_t *>(writeBuffer.nativeReadbackBuffer->map(0, &readRange));
+
+        // A lost device's buffer maps to nothing (Application::replaceLostDevice()): RDRAM keeps what it held.
+        if (readbackData == nullptr) {
+            return;
+        }
+
         memcpy(data, readbackData + bufferOffset, bufferSize);
 #   if defined(__EMSCRIPTEN__)
         // Rendering to RAM wrote these rows of the read buffer, so they go into what the CPU knows of it. Read back
