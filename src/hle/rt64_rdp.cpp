@@ -149,6 +149,15 @@ namespace RT64 {
             // Always tags regions in TMEM, regardless of whether it's possible to make a copy or not.
             uint32_t fbEnd = fb->addressStart + fb->imageRowBytes(fb->width) * fb->maxHeight;
             bool syncRequired = (fb->addressStart < addressEnd) && (fbEnd > addressStart);
+#       if defined(__EMSCRIPTEN__)
+            // A framebuffer no pair of this list has drawn yet (its maxHeight is reset as each list begins) holds what
+            // the lists before drew, in RAM by the time fullSync() loads the list's textures again: its range here is
+            // empty, and overlaps nothing. The test above takes it as overlapping a load that begins below the
+            // framebuffer's start. Mario Tennis' heaviest scenes load a palette from just below one of its small images
+            // 15-30 times a list, and each of those waited for the GPU to finish and the framebuffers to come back to
+            // RAM.
+            syncRequired = syncRequired && (fb->maxHeight > 0);
+#       endif
             fbManager.insertRegionsTMEM(fb->addressStart, tmemStart, std::min(tmemWords, uint32_t(RDP_TMEM_WORDS)), tmemMask, RGBA32, syncRequired, couldMakeTile ? &regionIterators : nullptr);
             
             if (couldMakeTile) {
