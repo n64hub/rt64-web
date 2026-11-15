@@ -270,7 +270,18 @@ namespace RT64 {
             }
 
             state->listEndsAfterFullSync = listEnds;
+#       if defined(__EMSCRIPTEN__)
+            {
+                // The game's list is in its full sync until it ends: the last list's late copy landing, the uploads
+                // that create a buffer as the draw data grows, and each batch's sync to RAM and its readback all wait
+                // for the device thread (SharedQueueResources::listGPUWaits). Held here, not in State::fullSync(),
+                // whose start and end the games' own patches of RT64 add to.
+                SharedQueueResources::ListGPUWait listGPUWait(state->ext.sharedQueueResources);
+                state->fullSync();
+            }
+#       else
             state->fullSync();
+#       endif
             state->listEndsAfterFullSync = false;
             state->dpInterrupt();
 

@@ -70,8 +70,8 @@ namespace RT64 {
         std::condition_variable interpolatedCondition;
         std::mutex workloadMutex;
 #   if defined(__EMSCRIPTEN__)
-        // The game's list in its full sync (a ListGPUWait in State::fullSync()), whose waits for the device thread (a
-        // readback of what it drew into RDRAM, a buffer made larger) wait for every WebGPU call sent before them: the
+        // The game's list in its full sync (a ListGPUWait around State::fullSync()), whose waits for the device thread
+        // (a readback of what it drew into RDRAM, a buffer made larger) wait for every WebGPU call sent before them: the
         // workload thread starts no interpolated frame meanwhile, for a while at most (waitForListGPUWaits()).
         uint32_t listGPUWaits = 0;
         std::mutex listGPUWaitMutex;

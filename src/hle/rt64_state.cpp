@@ -1026,11 +1026,6 @@ namespace RT64 {
     }
 
     void State::fullSync() {
-#   if defined(__EMSCRIPTEN__)
-        // To its end: the last list's late copy landing, the uploads that create a buffer as the draw data grows, and
-        // each batch's sync to RAM and its readback all wait for the device thread.
-        SharedQueueResources::ListGPUWait listGPUWait(ext.sharedQueueResources);
-#   endif
         landRAMCopies(false);
         flush();
         submitFramebufferPair(FramebufferPair::FlushReason::ProcessDisplayListsEnd);
