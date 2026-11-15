@@ -1275,8 +1275,15 @@ namespace RT64 {
         // moved on every frame drawn. A game that says nothing of them (no matrix ID, so no vertex interpolation of its
         // choosing) has them moved between frames too, from where the frame before drew them, when the two have as
         // many vertices and none moved further than the largest side of the box they span: the same thing moving, not
-        // a buffer the game filled with something else. In a block of its own after the extended GBI's interpolation and
-        // the texture coordinates', whose lines a game fork may change in its own patches.
+        // a buffer the game filled with something else. Nor when the vertices paired in order aren't each other: a
+        // buffer refilled with as many other vertices of the same model (a golf course's terrain, its chunks in another
+        // order as a flyover pans) passes that test, and the frames between would draw each vertex on its way to
+        // another's place, the model torn into loose triangles. So a sample of up to 64 of them is each checked against
+        // every vertex of the frame before, and one that has another of those at less than a quarter of the distance to
+        // its pair is paired with something else; 3 or more such, and one in 20 of the sample, leave the vertices to
+        // move on the game's own frames. A mesh that moves or bends keeps each vertex nearest to its own last place.
+        // In a block of its own after the extended GBI's interpolation and the texture coordinates', whose lines a game
+        // fork may change in its own patches.
         const bool autoVertices = (curGroup.matrixId == G_EX_ID_AUTO) && (curGroup.vertexInterpolation == G_EX_COMPONENT_SKIP);
         if (autoVertices && (curVertexCount > 0) && (curVertexCount == prevVertexCount)) {
             const std::vector<float> &curPosFloats = curWorkload.drawData.posFloats;
@@ -1297,7 +1304,32 @@ namespace RT64 {
             }
 
             const float extent = std::max(std::max(maxPos[0] - minPos[0], maxPos[1] - minPos[1]), maxPos[2] - minPos[2]);
-            if ((maxMove > 0.0f) && (maxMove <= extent)) {
+            auto distanceSquared = [](const float *a, const float *b) {
+                const float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2];
+                return (x * x) + (y * y) + (z * z);
+            };
+
+            auto pairedInOrder = [&]() {
+                const uint32_t sampleStep = std::max(curVertexCount / 64, 1U);
+                uint32_t sampled = 0;
+                uint32_t mispaired = 0;
+                for (uint32_t i = 0; i < curVertexCount; i += sampleStep) {
+                    const float *curPos = &curPosFloatsRef[i * 3];
+                    const float limit = distanceSquared(curPos, &prevPosFloatsRef[i * 3]) / 16.0f;
+                    for (uint32_t j = 0; j < prevVertexCount; j++) {
+                        if (distanceSquared(curPos, &prevPosFloatsRef[j * 3]) < limit) {
+                            mispaired++;
+                            break;
+                        }
+                    }
+
+                    sampled++;
+                }
+
+                return (mispaired < 3) || ((mispaired * 20) < sampled);
+            };
+
+            if ((maxMove > 0.0f) && (maxMove <= extent) && pairedInOrder()) {
                 float *curVelFloatsRef = &curVelFloats[curVertexIndex * 3];
                 for (uint32_t i = 0; i < (curVertexCount * 3); i++) {
                     curVelFloatsRef[i] = curPosFloatsRef[i] - prevPosFloatsRef[i];
