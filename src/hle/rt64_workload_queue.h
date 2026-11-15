@@ -66,6 +66,11 @@ namespace RT64 {
     // How many color targets a page's interpolated frames take turns in (WorkloadQueue::renderThreadLoop): 8 hold every
     // interpolated frame of a 7.5 fps game at 60 Hz, and ?uncapped's 360 Hz presents as many with any number.
     constexpr uint32_t InterpolatedTargetSlots = 8;
+
+    // How long an interpolated frame waits at most for a list of the game's in its full sync (SharedQueueResources::
+    // listGPUWaits): one takes a few ms once nothing is ahead of it on the device thread, and one that waits longer has
+    // its interpolated frames go on meanwhile.
+    constexpr uint32_t InterpolatedListWaitMs = 50;
 #endif
 
     struct WorkloadQueue {

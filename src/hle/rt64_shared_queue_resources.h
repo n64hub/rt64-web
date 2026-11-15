@@ -69,6 +69,28 @@ namespace RT64 {
         std::mutex interpolatedMutex;
         std::condition_variable interpolatedCondition;
         std::mutex workloadMutex;
+#   if defined(__EMSCRIPTEN__)
+        // The game's list in its full sync (State's ListGPUWait), whose waits for the device thread (a readback of
+        // what it drew into RDRAM, a buffer made larger) wait for every WebGPU call sent before them: the workload
+        // thread starts no interpolated frame meanwhile (WorkloadQueue::renderThreadLoop()).
+        uint32_t listGPUWaits = 0;
+        std::mutex listGPUWaitMutex;
+        std::condition_variable listGPUWaitCondition;
+
+        void listGPUWaitBegin() {
+            std::scoped_lock<std::mutex> listLock(listGPUWaitMutex);
+            listGPUWaits++;
+        }
+
+        void listGPUWaitEnd() {
+            {
+                std::scoped_lock<std::mutex> listLock(listGPUWaitMutex);
+                listGPUWaits--;
+            }
+
+            listGPUWaitCondition.notify_all();
+        }
+#   endif
 
         void setSwapChainSize(uint32_t width, uint32_t height) {
             std::scoped_lock<std::mutex> configurationLock(configurationMutex);
