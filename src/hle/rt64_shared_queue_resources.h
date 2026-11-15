@@ -70,9 +70,9 @@ namespace RT64 {
         std::condition_variable interpolatedCondition;
         std::mutex workloadMutex;
 #   if defined(__EMSCRIPTEN__)
-        // The game's list in its full sync (State's ListGPUWait), whose waits for the device thread (a readback of
-        // what it drew into RDRAM, a buffer made larger) wait for every WebGPU call sent before them: the workload
-        // thread starts no interpolated frame meanwhile (WorkloadQueue::renderThreadLoop()).
+        // The game's list in its full sync (a ListGPUWait in State::fullSync()), whose waits for the device thread (a
+        // readback of what it drew into RDRAM, a buffer made larger) wait for every WebGPU call sent before them: the
+        // workload thread starts no interpolated frame meanwhile, for a while at most (waitForListGPUWaits()).
         uint32_t listGPUWaits = 0;
         std::mutex listGPUWaitMutex;
         std::condition_variable listGPUWaitCondition;
@@ -90,6 +90,27 @@ namespace RT64 {
 
             listGPUWaitCondition.notify_all();
         }
+
+        // Until no list is in its full sync, or maxMs have gone by.
+        void waitForListGPUWaits(uint32_t maxMs) {
+            std::unique_lock<std::mutex> listLock(listGPUWaitMutex);
+            listGPUWaitCondition.wait_for(listLock, std::chrono::milliseconds(maxMs), [this]() {
+                return listGPUWaits == 0;
+            });
+        }
+
+        // A list in its full sync for as long as one lives.
+        struct ListGPUWait {
+            SharedQueueResources *resources;
+
+            ListGPUWait(SharedQueueResources *resources) : resources(resources) {
+                resources->listGPUWaitBegin();
+            }
+
+            ~ListGPUWait() {
+                resources->listGPUWaitEnd();
+            }
+        };
 #   endif
 
         void setSwapChainSize(uint32_t width, uint32_t height) {

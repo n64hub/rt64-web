@@ -1505,42 +1505,6 @@ namespace RT64 {
                 };
                 int64_t renderTimeTotalMicro = 0;
                 for (uint32_t frame = 0; (frame < displayFrames) && !skipWorkloadNow; frame++) {
-#               if defined(__EMSCRIPTEN__)
-                    // An interpolated frame isn't started while the game's next list is in its full sync
-                    // (SharedQueueResources::listGPUWaits), for at most InterpolatedListWaitMs. Its waits for the device
-                    // thread (a readback of a sync to RAM or of the late copy, a buffer made as the draw data grows) wait
-                    // for every WebGPU call sent before them, and an interpolated frame redraws all of a game frame's
-                    // framebuffers, so the list waited for every one this loop drew meanwhile: Mario Tennis' page, which
-                    // syncs to RAM in each of its lists (its rt64 patch), uncapped at 360 Hz drew 12-22 a game frame, and
-                    // each list's full sync waited 30-90 ms behind them. That held its matches at 11-16 game frames a
-                    // second against their 30 (and the frames' rate, which the window below is made of, fell with them),
-                    // and its sound ran short. If a newer workload came meanwhile, the rest of this one's frames are
-                    // skipped, as after a frame below; the time check that follows skips those that are late now.
-                    if ((frame > 0) && generateInterpolatedFrames) {
-                        bool listWaited = false;
-                        {
-                            std::unique_lock<std::mutex> listLock(ext.sharedResources->listGPUWaitMutex);
-                            const auto waitEnd = std::chrono::steady_clock::now() + std::chrono::milliseconds(InterpolatedListWaitMs);
-                            while ((ext.sharedResources->listGPUWaits > 0) && threadsRunning && (std::chrono::steady_clock::now() < waitEnd)) {
-                                ext.sharedResources->listGPUWaitCondition.wait_for(listLock, std::chrono::milliseconds(2));
-                                listWaited = true;
-                            }
-                        }
-
-                        if (listWaited && newerWorkloadQueued()) {
-                            skipWorkloadNow = true;
-                            {
-                                std::scoped_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
-                                curFrameCounters.skipped = true;
-                            }
-
-                            displayTicks += lastWorkload.viOriginalRate * (displayFrames - frame);
-                            ext.sharedResources->interpolatedCondition.notify_all();
-                            break;
-                        }
-                    }
-#               endif
-
                     // Evaluate if this frame should be skipped. Measure the current time and compare it to what frame is estimated should be have been rendered by now.
                     if ((frame > 0) && (originalTimeMicro > 0)) {
                         const int64_t currentTimeMicro = workloadTimer.elapsedMicroseconds() - setupTimeMicro;
@@ -1660,6 +1624,33 @@ namespace RT64 {
 
                         ext.sharedResources->interpolatedCondition.notify_all();
                     }
+
+#               if defined(__EMSCRIPTEN__)
+                    // The next interpolated frame isn't started while the game's next list is in its full sync
+                    // (SharedQueueResources::listGPUWaits), for at most InterpolatedListWaitMs. Its waits for the device
+                    // thread (a readback of a sync to RAM or of the late copy, a buffer made as the draw data grows) wait
+                    // for every WebGPU call sent before them, and an interpolated frame redraws all of a game frame's
+                    // framebuffers, so the list waited for every one this loop drew meanwhile: Mario Tennis' page, which
+                    // syncs to RAM in each of its lists (its rt64 patch), uncapped at 360 Hz drew 12-22 a game frame, and
+                    // each list's full sync waited 30-90 ms behind them. That held its matches at 11-16 game frames a
+                    // second against their 30 (and the frames' rate, which the window above is made of, fell with them),
+                    // and its sound ran short. The frame drawn is presented meanwhile. If a newer workload came, the rest
+                    // of this one's frames are skipped, as above; if not, the time check at the next frame skips those
+                    // that are late by then.
+                    if (generateInterpolatedFrames && !skipWorkloadNow && ((frame + 1) < displayFrames)) {
+                        ext.sharedResources->waitForListGPUWaits(InterpolatedListWaitMs);
+                        if (newerWorkloadQueued()) {
+                            skipWorkloadNow = true;
+                            {
+                                std::scoped_lock<std::mutex> managerLock(ext.sharedResources->interpolatedMutex);
+                                curFrameCounters.skipped = true;
+                            }
+
+                            displayTicks += lastWorkload.viOriginalRate * (displayFrames - (frame + 1));
+                            ext.sharedResources->interpolatedCondition.notify_all();
+                        }
+                    }
+#               endif
 
                     framesRendered++;
                 }

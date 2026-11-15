@@ -35,28 +35,6 @@
 #define MI_INTR_SP          0x00000001
 
 namespace RT64 {
-#if defined(__EMSCRIPTEN__)
-    // The game's list is in its full sync from when one is made until end() (SharedQueueResources::listGPUWaits).
-    struct ListGPUWait {
-        SharedQueueResources *resources;
-
-        ListGPUWait(SharedQueueResources *resources) : resources(resources) {
-            resources->listGPUWaitBegin();
-        }
-
-        void end() {
-            if (resources != nullptr) {
-                resources->listGPUWaitEnd();
-                resources = nullptr;
-            }
-        }
-
-        ~ListGPUWait() {
-            end();
-        }
-    };
-#endif
-
     const float ShiftScaleMap[] = {
         1.0f,
         1.0f / 2.0f,
@@ -1049,9 +1027,9 @@ namespace RT64 {
 
     void State::fullSync() {
 #   if defined(__EMSCRIPTEN__)
-        // Until the workload is queued: the last list's late copy landing, the uploads that create a buffer as the draw
-        // data grows, and each batch's sync to RAM and its readback all wait for the device thread.
-        ListGPUWait listGPUWait(ext.sharedQueueResources);
+        // To its end: the last list's late copy landing, the uploads that create a buffer as the draw data grows, and
+        // each batch's sync to RAM and its readback all wait for the device thread.
+        SharedQueueResources::ListGPUWait listGPUWait(ext.sharedQueueResources);
 #   endif
         landRAMCopies(false);
         flush();
@@ -2158,10 +2136,6 @@ namespace RT64 {
             }
         }
         
-#   if defined(__EMSCRIPTEN__)
-        listGPUWait.end();
-#   endif
-
         // Advance the workload queue at the end of a full synchronization.
         advanceWorkload(workload, false);
         ext.workloadQueue->advanceToNextWorkload();
