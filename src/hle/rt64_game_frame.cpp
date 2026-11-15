@@ -280,6 +280,60 @@ namespace RT64 {
         }
     };
 
+#if RT64_SKIP_CAMERA_CUTS
+    // Whether a perspective camera cut from one shot to another between two game frames, rather than moved: it turned
+    // more than 45 degrees in one game frame, or its eye jumped more than 8 of its near plane's distances and more than 4
+    // times as far as it moved the frame before. eyeStep is set to how far the eye moved, in near plane distances, for
+    // the next frame's check, or 0 after a cut, and to 0 for a camera these can't be read from (no near plane, a matrix
+    // that isn't finite or can't be inverted), which is never called a cut.
+    //
+    // A game that draws its frames with no matrix groups of its own pairs the camera of each frame with the one before,
+    // and RT64's frames between drew the cut halfway: Mario Golf cuts from the golfer to the ball and from the ball to
+    // where it lands, its eye 8-760 near plane distances away and often turned more than 90 degrees, and the frames
+    // between drew its trees stretched to several times their height for a frame. Its cameras that move (its flyovers,
+    // the ball's flight) moved at most about 7 near plane distances and turned at most about 24 degrees a game frame, and
+    // its fastest moved as fast for many frames running, which the second check's ratio to the frame before leaves out.
+    static bool isCameraCut(const hlslpp::float4x4 &curView, const hlslpp::float4x4 &curProj, const hlslpp::float4x4 &prevView, float prevEyeStep, float &eyeStep) {
+        eyeStep = 0.0f;
+
+        // The near plane's distance from a GL-style perspective (w = z * m23), whatever the scale it was built at.
+        const float nearDenominator = float(curProj[2][2]) + float(curProj[2][3]);
+        const float nearDistance = (nearDenominator != 0.0f) ? fabsf(float(curProj[3][2]) / nearDenominator) : 0.0f;
+        if (!std::isfinite(nearDistance) || (nearDistance <= 0.0f)) {
+            return false;
+        }
+
+        const hlslpp::float3x3 curRotation = extract3x3(curView);
+        const hlslpp::float3x3 prevRotation = extract3x3(prevView);
+        const float curDeterminant = hlslpp::determinant(curRotation);
+        const float prevDeterminant = hlslpp::determinant(prevRotation);
+        if (!std::isfinite(curDeterminant) || !std::isfinite(prevDeterminant) || (curDeterminant == 0.0f) || (prevDeterminant == 0.0f)) {
+            return false;
+        }
+
+        // The inverse's rows are the camera's axes in the world, and its eye is where the view moves the origin from.
+        const hlslpp::float3x3 curInverse = hlslpp::inverse(curRotation);
+        const hlslpp::float3x3 prevInverse = hlslpp::inverse(prevRotation);
+        const hlslpp::float3 curEye = -hlslpp::mul(hlslpp::float3(curView[3].xyz), curInverse);
+        const hlslpp::float3 prevEye = -hlslpp::mul(hlslpp::float3(prevView[3].xyz), prevInverse);
+        const float step = float(hlslpp::length(curEye - prevEye)) / nearDistance;
+        const float turnCosine = hlslpp::dot(hlslpp::normalize(curInverse[2]), hlslpp::normalize(prevInverse[2]));
+        if (!std::isfinite(step) || !std::isfinite(turnCosine)) {
+            return false;
+        }
+
+        const float MaxTurnCosine = 0.7071f;
+        const float MinJump = 8.0f;
+        const float MinJumpRatio = 4.0f;
+        if ((turnCosine < MaxTurnCosine) || ((step > MinJump) && (step > (prevEyeStep * MinJumpRatio)))) {
+            return true;
+        }
+
+        eyeStep = step;
+        return false;
+    }
+#endif
+
     TransformMatchResult computeTransformMatch(const hlslpp::float4x4 &curTransform, const hlslpp::float4x4 &curViewProj, const hlslpp::float4x4 &prevTransform, const hlslpp::float4x4 &prevViewProj, const RigidBody *prevRigidBody) {
         TransformMatchResult matchResult;
 
@@ -728,6 +782,24 @@ namespace RT64 {
                 }
                 else {
                     viewProjMap.mapped = (curProjGroup.matrixId == G_EX_ID_AUTO);
+#               if RT64_SKIP_CAMERA_CUTS
+                    // A camera the game gives no matrix group of its own that cut to another shot pairs with nothing,
+                    // and neither does anything its scene draws: the frames between draw the new frame as it is, where
+                    // a cut drawn halfway put the world between two places (isCameraCut()).
+                    if (viewProjMap.mapped && (curProj.type == Projection::Type::Perspective) && (prevProj.type == Projection::Type::Perspective)) {
+                        float prevEyeStep = 0.0f;
+                        if (firstPrevWorkloadMap != nullptr) {
+                            prevEyeStep = firstPrevWorkloadMap->viewProjections[prevProj.transformsIndex].eyeStep;
+                        }
+
+                        const hlslpp::float4x4 &curProjection = curWorkload.drawData.projTransforms[curProj.transformsIndex];
+                        if (isCameraCut(curView, curProjection, prevView, prevEyeStep, viewProjMap.eyeStep)) {
+                            viewProjMap.mapped = false;
+                            viewProjMap.rigidBody = RigidBody();
+                            return;
+                        }
+                    }
+#               endif
                 }
 
                 if (viewProjMap.mapped) {
