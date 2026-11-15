@@ -610,6 +610,20 @@ namespace RT64 {
                     continue;
                 }
 
+#           if RT64_EXACT_PRIM_DEPTH
+                // A G_ZS_PRIM draw's depth range has no height, every other draw's is the framebuffer's whole range.
+                if (previousPrimDepth != triangles.primDepth) {
+                    RenderViewport viewport = framebuffer.viewport;
+                    if (triangles.primDepth >= 0.0f) {
+                        viewport.minDepth = triangles.primDepth;
+                        viewport.maxDepth = triangles.primDepth;
+                    }
+
+                    worker->commandList->setViewports(viewport);
+                    previousPrimDepth = triangles.primDepth;
+                }
+#           endif
+
                 // A new pass must be started if decals are required and something wrote to the depth buffer before this call.
                 // A prebuilt decal on WebGPU reads no depth and writes the stencil, so it needs the pass that writes them.
                 const interop::OtherMode otherMode = triangles.shaderDesc.otherMode;
@@ -626,20 +640,6 @@ namespace RT64 {
                     worker->commandList->setScissors(triangles.scissor);
                     previousScissor = triangles.scissor;
                 }
-
-#           if RT64_EXACT_PRIM_DEPTH
-                // A G_ZS_PRIM draw's depth range has no height, every other draw's is the framebuffer's whole range.
-                if (previousPrimDepth != triangles.primDepth) {
-                    RenderViewport viewport = framebuffer.viewport;
-                    if (triangles.primDepth >= 0.0f) {
-                        viewport.minDepth = triangles.primDepth;
-                        viewport.maxDepth = triangles.primDepth;
-                    }
-
-                    worker->commandList->setViewports(viewport);
-                    previousPrimDepth = triangles.primDepth;
-                }
-#           endif
 
                 if (previousPipeline != triangles.pipeline) {
                     worker->commandList->setPipeline(triangles.pipeline);
