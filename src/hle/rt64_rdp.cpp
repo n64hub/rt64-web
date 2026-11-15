@@ -1402,12 +1402,12 @@ namespace RT64 {
         }
 
 #   if defined(__EMSCRIPTEN__)
-        // Fix LR with Scissor can stretch a rectangle by a row the game doesn't draw, and that row samples past a
-        // framebuffer row's tile copy (FramebufferManager::checkRowTileCopy), which then can't be used: the texture
-        // would come from TMEM instead, one wait a frame for the GPU and the framebuffers back in RAM. A rect one row
-        // tall isn't stretched (RT64_KEEP_THIN_RECTS, on here), but a taller one copied from a few rows can be. A row's
-        // tile copy is judged by the game's own rectangle; the added row samples past the copy, as it sampled past the
-        // rows loaded in TMEM.
+        // Fix LR with Scissor can stretch a rectangle by a row the game doesn't draw, and that row samples past a tile
+        // copy found for only what the call samples (a framebuffer row's, FramebufferManager::checkRowTileCopy, or a
+        // block's, checkLeadingTileCopy), which then can't be used: the texture would come from TMEM instead, one wait
+        // for the GPU and the framebuffers back in RAM. A rect one row tall isn't stretched (RT64_KEEP_THIN_RECTS, on
+        // here), but a taller one copied from a few rows can be. Such a tile copy is judged by the game's own rectangle;
+        // the added row samples past the copy, as it sampled past the rows loaded in TMEM.
         if ((lry != gameLry) && !flip && (dtdy > 0)) {
             const FixedRect gameRect(drawRect.ulx, drawRect.uly, drawRect.lrx, gameLry);
             if (!gameRect.isEmpty()) {
@@ -1415,7 +1415,7 @@ namespace RT64 {
                 const int32_t gameMaxT = int32_t(ceilf(gameLrt / 32.0f + vFractionOffset));
                 for (uint32_t t = 0; t < drawCall.tileCount; t++) {
                     DrawCallTile &callTile = workload.drawData.callTiles[drawCall.tileIndex + t];
-                    if (callTile.rowTileCopy) {
+                    if (callTile.texcoordTileCopy) {
                         callTile.maxTexcoord.y = std::min(callTile.maxTexcoord.y, gameMaxT);
                     }
                 }

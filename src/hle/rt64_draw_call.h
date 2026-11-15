@@ -154,10 +154,11 @@ namespace RT64 {
         bool syncRequired;
         bool tileCopyUsed;
 #   if defined(__EMSCRIPTEN__)
-        // The tile copy is of a framebuffer row (FramebufferManager::checkRowTileCopy), and the TMEM hash to sample if the
-        // call's texcoords leave it.
-        bool rowTileCopy;
-        uint64_t rowTileFallbackHash;
+        // The tile copy was found for less TMEM than the tile can sample (FramebufferManager::checkRowTileCopy and
+        // checkLeadingTileCopy), so only the call's texcoords decide whether it is used, and the TMEM hash to sample if
+        // they leave it.
+        bool texcoordTileCopy;
+        uint64_t tileCopyFallbackHash;
 
         // Where the TMEM that asks for the sync begins (FramebufferManager::CheckCopyResult::syncTMEMStart), 0 if the
         // sync is asked for whatever the call samples.

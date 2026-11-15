@@ -717,6 +717,30 @@ namespace RT64 {
 
         return result;
     }
+
+    // The tile copy of a framebuffer block of 16 or 32 bits loaded at tmemStart with the tile's line, if there is one,
+    // whatever the tile's size or mask say past it: checkRegionsTMEM() only finds a copy that holds all the TMEM the tile
+    // can sample, and a tile larger than the block loaded (a 32x32 tile over 16x16 texels) can sample more than the copy.
+    // Whether the call's texcoords stay inside the copy is checked in fullSync(), as for any tile copy.
+    FramebufferManager::CheckCopyResult FramebufferManager::checkLeadingTileCopy(uint32_t tmemStart, uint32_t lineWidth, uint8_t siz, uint8_t fmt) const {
+        CheckCopyResult result;
+        for (const RegionTMEM &region : activeRegionsTMEM) {
+            const FramebufferTile &fbTile = region.fbTile;
+            if ((region.tmemStart != tmemStart) || !fbTile.valid() || (fbTile.lineWidth != lineWidth) || (fbTile.siz != siz) || (fbTile.fmt != fmt) || (siz < G_IM_SIZ_16b)) {
+                continue;
+            }
+
+            result.tileId = region.tileCopyId;
+            result.tileWidth = fbTile.right - fbTile.left;
+            result.lineWidth = fbTile.lineWidth;
+            result.tileHeight = fbTile.bottom - fbTile.top;
+            result.fmt = fbTile.fmt;
+            result.siz = fbTile.siz;
+            break;
+        }
+
+        return result;
+    }
 #endif
 
     FramebufferManager::CheckCopyResult FramebufferManager::checkRegionsTMEM(uint32_t tmemStart, uint32_t tmemEnd, uint32_t lineWidth, uint8_t siz, uint8_t fmt, uint16_t uls, bool usesTLUT, uint8_t palette) {

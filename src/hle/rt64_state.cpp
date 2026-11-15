@@ -382,13 +382,23 @@ namespace RT64 {
                     // vision copies each of the framebuffer's rows this way through a 513x9 tile of line 160, which checks
                     // all of TMEM against a line twice the row's, so without this each row's texture came from RDRAM:
                     // ~250 TMEM uploads a frame, each waiting for the GPU to write the framebuffer back first.
-                    dstCallTile.rowTileCopy = false;
+                    //
+                    // A framebuffer block loaded at the tile's TMEM address with the tile's line is sampled from its tile
+                    // copy the same way when the tile's size or mask reach past the block. Mario Tennis draws a sprite in
+                    // its heaviest scenes as 31 rectangles, each sampling a 16x16 block of the screen buffer it then draws
+                    // over through a 32x32 tile, and each waited for the GPU and the screen buffer back in RAM: 31 of a
+                    // list's 38 syncs, each a GPU round trip.
+                    dstCallTile.texcoordTileCopy = false;
                     if (gpuCopiesEnabled && !checkResult.valid() && !RGBA32 && !usesTLUT) {
-                        const FramebufferManager::CheckCopyResult rowResult = framebufferManager.checkRowTileCopy(tile.tmem, tile.siz, tile.fmt);
-                        if (rowResult.valid()) {
-                            dstCallTile.rowTileCopy = true;
-                            dstCallTile.rowTileFallbackHash = rdp->tileReplacementHashes[tileIndex];
-                            checkResult = rowResult;
+                        FramebufferManager::CheckCopyResult texcoordResult = framebufferManager.checkRowTileCopy(tile.tmem, tile.siz, tile.fmt);
+                        if (!texcoordResult.valid()) {
+                            texcoordResult = framebufferManager.checkLeadingTileCopy(tile.tmem, dstCallTile.lineWidth, tile.siz, tile.fmt);
+                        }
+
+                        if (texcoordResult.valid()) {
+                            dstCallTile.texcoordTileCopy = true;
+                            dstCallTile.tileCopyFallbackHash = rdp->tileReplacementHashes[tileIndex];
+                            checkResult = texcoordResult;
                         }
                     }
 #               endif
@@ -1184,10 +1194,11 @@ namespace RT64 {
                 if (insufficientWidth || insufficientHeight) {
                     callTile.tileCopyUsed = false;
 #               if defined(__EMSCRIPTEN__)
-                    // A row's tile copy that the texcoords leave samples TMEM's contents as before. The sync this needs
-                    // is the one the original check asked for (syncRequired).
-                    if (callTile.rowTileCopy) {
-                        callTile.tmemHashOrID = callTile.rowTileFallbackHash;
+                    // A tile copy found for less than the tile can sample (texcoordTileCopy) that the texcoords leave
+                    // samples TMEM's contents as before. The sync this needs is the one the original check asked for
+                    // (syncRequired).
+                    if (callTile.texcoordTileCopy) {
+                        callTile.tmemHashOrID = callTile.tileCopyFallbackHash;
                     }
 #               endif
                 }
