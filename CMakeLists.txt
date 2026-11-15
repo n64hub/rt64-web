@@ -26,6 +26,7 @@ option(RT64_STRETCH_CPU_CHANGES "Stretch what the CPU writes into a framebuffer 
 option(RT64_PARTIAL_SCREEN_PAIRS "Judge a framebuffer pair that draws only part of a framebuffer the VI shows (a view of a split screen the game sends in an RSP task of its own) by the whole screen, so its views and rects are kept at 4:3 in a wide window as they are beside the rest of the screen in one task (always on with Emscripten)" OFF)
 option(RT64_STRETCH_SCREEN_COVERS "Stretch a call of a few triangles in front of a perspective camera that covers its whole viewport (a plate or a fade a game draws in 3D, sized to the 4:3 screen) across a picture RT64 draws wider than 4:3, as a rect that spans the scissor's width is, so it still covers the picture (always on with Emscripten)" OFF)
 option(RT64_KEEP_THIN_RECTS "Leave a rect one pixel tall or wide as the game drew it when Fix LR with Scissor would stretch it to the scissor's edge, so a game that copies a framebuffer back a row at a time draws no row twice, the second from texels it never loaded (always on with Emscripten)" OFF)
+option(RT64_EXACT_PRIM_DEPTH "Draw a G_ZS_PRIM triangle through a perspective or orthographic projection at exactly its prim depth, by a viewport depth range of no height, not at the vertex shader's z = primDepth * w, which the perspective divide leaves an ulp off on some vertices, so that under a strict depth test only the first of its triangles to cover a pixel draws there, as on the console (always on with Emscripten)" OFF)
 
 if (NOT ${RT64_STATIC})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -567,6 +568,9 @@ if (RT64_STRETCH_SCREEN_COVERS OR RT64_WGSL)
 endif()
 if (RT64_KEEP_THIN_RECTS OR RT64_WGSL)
     target_compile_definitions(rt64 PRIVATE RT64_KEEP_THIN_RECTS=1)
+endif()
+if (RT64_EXACT_PRIM_DEPTH OR RT64_WGSL)
+    target_compile_definitions(rt64 PRIVATE RT64_EXACT_PRIM_DEPTH=1)
 endif()
 
 # Add common libraries.

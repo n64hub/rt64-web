@@ -515,6 +515,9 @@ namespace RT64 {
         bool previousVertexTestZ = false;
         const RenderPipeline *previousPipeline = nullptr;
         RenderRect previousScissor;
+#   if RT64_EXACT_PRIM_DEPTH
+        float previousPrimDepth = -1.0f;
+#   endif
         interop::RasterParams rasterParams;
         RenderDescriptorSet *descRealFbSet = framebuffer.descRealFbSet->get();
         RenderDescriptorSet *descDummyFbSet = framebuffer.descDummyFbSet->get();
@@ -525,6 +528,9 @@ namespace RT64 {
             previousVertexTestZ = false;
             previousPipeline = nullptr;
             previousScissor = RenderRect();
+#       if RT64_EXACT_PRIM_DEPTH
+            previousPrimDepth = -1.0f;
+#       endif
             worker->commandList->setGraphicsPipelineLayout(rendererPipelineLayout);
             worker->commandList->setGraphicsDescriptorSet(descCommonSet->get(), 0);
             if (usePerDrawTextures) {
@@ -620,6 +626,20 @@ namespace RT64 {
                     worker->commandList->setScissors(triangles.scissor);
                     previousScissor = triangles.scissor;
                 }
+
+#           if RT64_EXACT_PRIM_DEPTH
+                // A G_ZS_PRIM draw's depth range has no height, every other draw's is the framebuffer's whole range.
+                if (previousPrimDepth != triangles.primDepth) {
+                    RenderViewport viewport = framebuffer.viewport;
+                    if (triangles.primDepth >= 0.0f) {
+                        viewport.minDepth = triangles.primDepth;
+                        viewport.maxDepth = triangles.primDepth;
+                    }
+
+                    worker->commandList->setViewports(viewport);
+                    previousPrimDepth = triangles.primDepth;
+                }
+#           endif
 
                 if (previousPipeline != triangles.pipeline) {
                     worker->commandList->setPipeline(triangles.pipeline);
@@ -1789,6 +1809,24 @@ namespace RT64 {
                         if (usesViewport) {
                             triangles.scissor = viewportScissorIntersection(viewportClip, triangles.scissor);
                         }
+
+#                   if RT64_EXACT_PRIM_DEPTH
+                        // RT64_EXACT_PRIM_DEPTH: on the console every pixel of a G_ZS_PRIM draw has exactly the prim
+                        // depth. The vertex shader's z = primDepth * w (RasterVS.hlsl) comes out an ulp off after the
+                        // perspective divide on some vertices, so a model drawn again flat at one depth as its shadow,
+                        // under a strict depth test that lets only the first of its overlapping triangles darken a
+                        // pixel, darkened some twice at a high resolution. A viewport depth range of no height makes
+                        // the window depth exactly primDepth and changes nothing else. A decal keeps the whole range:
+                        // it compares its depth within a tolerance, and a prebuilt one on WebGPU writes its depth
+                        // bounds (RasterPS.hlsl, DECAL_DEPTH_BOUNDS), which the viewport's range would clamp to primDepth.
+                        triangles.primDepth = -1.0f;
+                        const interop::OtherMode primOtherMode = call.shaderDesc.otherMode;
+                        if (usesViewport && (primOtherMode.zSource() == G_ZS_PRIM) && (primOtherMode.cycleType() != G_CYC_COPY) &&
+                            (primOtherMode.zMode() != ZMODE_DEC))
+                        {
+                            triangles.primDepth = std::clamp(call.callDesc.rdpParams.primDepth.x, 0.0f, 1.0f);
+                        }
+#                   endif
                         
                         if (triangles.vertexTestZ && usesViewport) {
                             instanceDrawCallVector[vertexTestZCallIndex].vertexTestZ.indexCount += call.callDesc.triangleCount * 3;

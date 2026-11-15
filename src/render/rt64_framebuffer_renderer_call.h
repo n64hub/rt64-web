@@ -38,6 +38,10 @@ namespace RT64 {
                 interop::float2 screenScale;
                 interop::float2 screenOffset;
                 RenderRect scissor;
+#           if RT64_EXACT_PRIM_DEPTH
+                // The depth a G_ZS_PRIM draw's viewport range is narrowed to (RT64_EXACT_PRIM_DEPTH), or -1.
+                float primDepth;
+#           endif
                 uint32_t indexStart;
                 uint32_t faceCount;
                 bool vertexTestZ : 1;
