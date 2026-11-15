@@ -1724,6 +1724,24 @@ namespace RT64 {
 
                         RasterShader *gpuShader = p.ubershadersOnly ? nullptr : p.rasterShaderCache->getGPUShader(call.shaderDesc);
                         triangles.decalMarkPipeline = nullptr;
+#                   if RT64_EXACT_PRIM_DEPTH
+                        // RT64_EXACT_PRIM_DEPTH: on the console every pixel of a G_ZS_PRIM draw has exactly the prim
+                        // depth. The vertex shader's z = primDepth * w (RasterVS.hlsl) comes out an ulp off after the
+                        // perspective divide on some vertices, so a model drawn again flat at one depth as its shadow,
+                        // under a strict depth test that lets only the first of its overlapping triangles darken a
+                        // pixel, darkened some twice at a high resolution. A viewport depth range of no height makes
+                        // the window depth exactly primDepth and changes nothing else. A decal keeps the whole range:
+                        // it compares its depth within a tolerance, and a prebuilt one on WebGPU writes its depth
+                        // bounds (RasterPS.hlsl, DECAL_DEPTH_BOUNDS), which the viewport's range would clamp to primDepth.
+                        triangles.primDepth = -1.0f;
+                        const interop::OtherMode primOtherMode = call.shaderDesc.otherMode;
+                        const bool primUsesViewport = (proj.type == Projection::Type::Perspective) || (proj.type == Projection::Type::Orthographic);
+                        if (primUsesViewport && (primOtherMode.zSource() == G_ZS_PRIM) && (primOtherMode.cycleType() != G_CYC_COPY) &&
+                            (primOtherMode.zMode() != ZMODE_DEC))
+                        {
+                            triangles.primDepth = std::clamp(call.callDesc.rdpParams.primDepth.x, 0.0f, 1.0f);
+                        }
+#                   endif
                         if (gpuShader != nullptr) {
                             triangles.pipeline = gpuShader->pipeline.get();
                             triangles.decalMarkPipeline = gpuShader->decalMarkPipeline.get();
@@ -1809,24 +1827,6 @@ namespace RT64 {
                         if (usesViewport) {
                             triangles.scissor = viewportScissorIntersection(viewportClip, triangles.scissor);
                         }
-
-#                   if RT64_EXACT_PRIM_DEPTH
-                        // RT64_EXACT_PRIM_DEPTH: on the console every pixel of a G_ZS_PRIM draw has exactly the prim
-                        // depth. The vertex shader's z = primDepth * w (RasterVS.hlsl) comes out an ulp off after the
-                        // perspective divide on some vertices, so a model drawn again flat at one depth as its shadow,
-                        // under a strict depth test that lets only the first of its overlapping triangles darken a
-                        // pixel, darkened some twice at a high resolution. A viewport depth range of no height makes
-                        // the window depth exactly primDepth and changes nothing else. A decal keeps the whole range:
-                        // it compares its depth within a tolerance, and a prebuilt one on WebGPU writes its depth
-                        // bounds (RasterPS.hlsl, DECAL_DEPTH_BOUNDS), which the viewport's range would clamp to primDepth.
-                        triangles.primDepth = -1.0f;
-                        const interop::OtherMode primOtherMode = call.shaderDesc.otherMode;
-                        if (usesViewport && (primOtherMode.zSource() == G_ZS_PRIM) && (primOtherMode.cycleType() != G_CYC_COPY) &&
-                            (primOtherMode.zMode() != ZMODE_DEC))
-                        {
-                            triangles.primDepth = std::clamp(call.callDesc.rdpParams.primDepth.x, 0.0f, 1.0f);
-                        }
-#                   endif
                         
                         if (triangles.vertexTestZ && usesViewport) {
                             instanceDrawCallVector[vertexTestZCallIndex].vertexTestZ.indexCount += call.callDesc.triangleCount * 3;
