@@ -3,6 +3,7 @@
 //
 
 #include <algorithm>
+#include <cstring>
 
 #include "common/rt64_math.h"
 
@@ -331,6 +332,46 @@ namespace RT64 {
 
         eyeStep = step;
         return false;
+    }
+#endif
+
+#if RT64_SKIP_PLACE_SWAPS
+    // A transform's place, its translation's bits (+0 and -0 the same), to find whether a frame drew anything at
+    // exactly that place: what stands still in a game's world is drawn at the very same matrix translation each frame.
+    struct TransformPlace {
+        uint32_t bits[3];
+
+        bool operator<(const TransformPlace &o) const {
+            if (bits[0] != o.bits[0]) {
+                return bits[0] < o.bits[0];
+            }
+
+            return (bits[1] != o.bits[1]) ? (bits[1] < o.bits[1]) : (bits[2] < o.bits[2]);
+        }
+
+        bool operator==(const TransformPlace &o) const {
+            return (bits[0] == o.bits[0]) && (bits[1] == o.bits[1]) && (bits[2] == o.bits[2]);
+        }
+    };
+
+    static TransformPlace transformPlace(const interop::float4x4 &transform) {
+        TransformPlace place;
+        for (int i = 0; i < 3; i++) {
+            const float value = (transform.m[3][i] == 0.0f) ? 0.0f : transform.m[3][i];
+            memcpy(&place.bits[i], &value, sizeof(float));
+        }
+
+        return place;
+    }
+
+    static void collectTransformPlaces(const Workload &workload, std::vector<TransformPlace> &places) {
+        places.clear();
+        for (const interop::float4x4 &transform : workload.drawData.worldTransforms) {
+            places.emplace_back(transformPlace(transform));
+        }
+
+        std::sort(places.begin(), places.end());
+        places.erase(std::unique(places.begin(), places.end()), places.end());
     }
 #endif
 
@@ -997,11 +1038,34 @@ namespace RT64 {
         const RigidBody *prevRigidBody;
         const hlslpp::float4x4 &firstCurViewProj = firstCurWorkload.drawData.viewProjTransforms[firstCurProj.transformsIndex];
         const hlslpp::float4x4 &firstPrevViewProj = firstPrevWorkload.drawData.viewProjTransforms[firstPrevProj.transformsIndex];
+#if RT64_SKIP_PLACE_SWAPS
+        // Nor a transform with one of the frame before that drew at another place, when each frame drew something at
+        // both places. Both places then held still, and the pair trades one object for another: a game that draws the
+        // same model at many places can draw them in another order or with another call each frame (a level of detail
+        // for the distance, the ones in view first), so the same call's transforms are paired across objects, and the
+        // frames between drew each halfway to another's place. Mario Golf's flyover of a hole drew the course's trees
+        // out on the fairway every other frame, and its trees jumped about as a shot was aimed, a fifth of a frame's
+        // trees paired so. Left unpaired, each is drawn at its own place between the frames, as it stood. What moves
+        // into the very place another left in the same frame is left unpaired too, and steps for a frame.
+        thread_local std::vector<TransformPlace> curPlaces;
+        thread_local std::vector<TransformPlace> prevPlaces;
+        if (!transformCheckSet.empty()) {
+            collectTransformPlaces(firstCurWorkload, curPlaces);
+            collectTransformPlaces(firstPrevWorkload, prevPlaces);
+        }
+#endif
         for (const IndexPair &indices : transformCheckSet) {
             const hlslpp::float4x4 &curTransform = firstCurWorkload.drawData.worldTransforms[indices.first];
             const hlslpp::float4x4 &prevTransform = firstPrevWorkload.drawData.worldTransforms[indices.second];
             prevRigidBody = (firstPrevWorkloadMap != nullptr) ? &firstPrevWorkloadMap->transforms[indices.second].rigidBody : nullptr;
 
+#if RT64_SKIP_PLACE_SWAPS
+            const TransformPlace curPlace = transformPlace(firstCurWorkload.drawData.worldTransforms[indices.first]);
+            const TransformPlace prevPlace = transformPlace(firstPrevWorkload.drawData.worldTransforms[indices.second]);
+            if (!(curPlace == prevPlace) && std::binary_search(prevPlaces.begin(), prevPlaces.end(), curPlace) && std::binary_search(curPlaces.begin(), curPlaces.end(), prevPlace)) {
+                continue;
+            }
+#endif
             TransformMatchResult matchResult = computeTransformMatch(curTransform, firstCurViewProj, prevTransform, firstPrevViewProj, prevRigidBody);
             if (matchResult.valid) {
                 matchCandidates.emplace_back(indices.first, indices.second, matchResult.computeDifference());
