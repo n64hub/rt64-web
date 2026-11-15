@@ -610,20 +610,6 @@ namespace RT64 {
                     continue;
                 }
 
-#           if RT64_EXACT_PRIM_DEPTH
-                // A G_ZS_PRIM draw's depth range has no height, every other draw's is the framebuffer's whole range.
-                if (previousPrimDepth != triangles.primDepth) {
-                    RenderViewport viewport = framebuffer.viewport;
-                    if (triangles.primDepth >= 0.0f) {
-                        viewport.minDepth = triangles.primDepth;
-                        viewport.maxDepth = triangles.primDepth;
-                    }
-
-                    worker->commandList->setViewports(viewport);
-                    previousPrimDepth = triangles.primDepth;
-                }
-#           endif
-
                 // A new pass must be started if decals are required and something wrote to the depth buffer before this call.
                 // A prebuilt decal on WebGPU reads no depth and writes the stencil, so it needs the pass that writes them.
                 const interop::OtherMode otherMode = triangles.shaderDesc.otherMode;
@@ -661,6 +647,20 @@ namespace RT64 {
                 // The shaders take the draw's index as its first instance instead (rt64_raster_params.h).
                 rasterParams.renderIndex = 0;
                 firstInstance = i;
+#           endif
+
+#           if RT64_EXACT_PRIM_DEPTH
+                // A G_ZS_PRIM draw's depth range has no height, every other draw's is the framebuffer's whole range.
+                if (previousPrimDepth != triangles.primDepth) {
+                    RenderViewport viewport = framebuffer.viewport;
+                    if (triangles.primDepth >= 0.0f) {
+                        viewport.minDepth = triangles.primDepth;
+                        viewport.maxDepth = triangles.primDepth;
+                    }
+
+                    worker->commandList->setViewports(viewport);
+                    previousPrimDepth = triangles.primDepth;
+                }
 #           endif
 
                 // A prebuilt decal's first draw marks the stencil where the surface is no deeper than its high bound
