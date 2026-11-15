@@ -3073,6 +3073,11 @@ namespace RT64 {
         workload.debuggerRenderer = debuggerInspector.renderer;
         workload.paused = paused;
 
+#   if defined(__EMSCRIPTEN__)
+        // The game's list in its full sync ends as its workload is queued (SharedQueueResources::listInFullSync).
+        ext.sharedQueueResources->listGPUWaitEnd();
+#   endif
+
         // Whether the workload draws to any framebuffer the VI has shown (shownFramebuffers), for a workload a full sync
         // ends. It's worked out here, not where fullSync() ends, which the games' own patches of RT64 add to. A workload
         // that draws nothing is no offscreen pass even where it sets a color image, as a game's RSP task that draws

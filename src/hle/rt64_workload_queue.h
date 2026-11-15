@@ -68,7 +68,7 @@ namespace RT64 {
     constexpr uint32_t InterpolatedTargetSlots = 8;
 
     // How long an interpolated frame waits at most for a list of the game's in its full sync (SharedQueueResources::
-    // listGPUWaits), after which its interpolated frames go on meanwhile. A sync's own readbacks take what the list's
+    // listInFullSync), after which its interpolated frames go on meanwhile. A sync's own readbacks take what the list's
     // draws cost the GPU: Mario Tennis' lists, which sync to RAM, took 20-40 ms a list at a 3840x2000 canvas and 100-150
     // in its heaviest scenes, capped at 60 Hz too. With 50 ms its match uncapped there played at 19-20 game frames a
     // second on average, since a frame started past the limit held the sync's later readbacks again, against 24 with

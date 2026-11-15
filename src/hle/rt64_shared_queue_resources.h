@@ -70,36 +70,44 @@ namespace RT64 {
         std::condition_variable interpolatedCondition;
         std::mutex workloadMutex;
 #   if defined(__EMSCRIPTEN__)
-        // The game's list in its full sync (a ListGPUWait around State::fullSync()), whose waits for the device thread
-        // (a readback of what it drew into RDRAM, a buffer made larger) wait for every WebGPU call sent before them: the
-        // workload thread starts no interpolated frame meanwhile, for a while at most (waitForListGPUWaits()).
-        uint32_t listGPUWaits = 0;
+        // Whether the game's list is in its full sync, from GBI_RDP::fullSync()'s ListGPUWait until
+        // State::advanceWorkload() queues its workload: its waits for the device thread (a readback of what it drew
+        // into RDRAM, a buffer made larger) wait for every WebGPU call sent before them, so the workload thread starts
+        // no interpolated frame meanwhile, for a while at most (waitForListGPUWaits()). It ends before the workload is
+        // queued, since that waits for the workload thread when the queue is full, and so do the present queue's waits
+        // after it.
+        bool listInFullSync = false;
         std::mutex listGPUWaitMutex;
         std::condition_variable listGPUWaitCondition;
 
         void listGPUWaitBegin() {
             std::scoped_lock<std::mutex> listLock(listGPUWaitMutex);
-            listGPUWaits++;
+            listInFullSync = true;
         }
 
+        // Ends it if it hasn't ended.
         void listGPUWaitEnd() {
             {
                 std::scoped_lock<std::mutex> listLock(listGPUWaitMutex);
-                listGPUWaits--;
+                if (!listInFullSync) {
+                    return;
+                }
+
+                listInFullSync = false;
             }
 
             listGPUWaitCondition.notify_all();
         }
 
-        // Until no list is in its full sync, or maxMs have gone by.
+        // Until the game's list isn't in its full sync, or maxMs have gone by.
         void waitForListGPUWaits(uint32_t maxMs) {
             std::unique_lock<std::mutex> listLock(listGPUWaitMutex);
             listGPUWaitCondition.wait_for(listLock, std::chrono::milliseconds(maxMs), [this]() {
-                return listGPUWaits == 0;
+                return !listInFullSync;
             });
         }
 
-        // A list in its full sync for as long as one lives.
+        // The game's list in its full sync for as long as one lives, unless it ends first.
         struct ListGPUWait {
             SharedQueueResources *resources;
 
