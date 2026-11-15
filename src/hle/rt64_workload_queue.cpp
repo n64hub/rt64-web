@@ -1634,21 +1634,11 @@ namespace RT64 {
                     // syncs to RAM in each of its lists (its rt64 patch), uncapped at 360 Hz drew 12-22 a game frame, and
                     // each list's full sync waited 30-90 ms behind them. That held its matches at 11-16 game frames a
                     // second against their 30 (and the frames' rate, which the window above is made of, fell with them),
-                    // and its sound ran short. The frame drawn is presented meanwhile. If a newer workload came, the rest
-                    // of this one's frames are skipped, as above; if not, the time check at the next frame skips those
-                    // that are late by then.
+                    // and its sound ran short. The frame drawn is presented meanwhile, and this loop's own skips go on
+                    // as they are, since the game forks' patches of RT64 change them: the time check skips the next frame
+                    // if it is late by then, and once one is drawn, the rest go if a newer workload came.
                     if (generateInterpolatedFrames && !skipWorkloadNow && ((frame + 1) < displayFrames)) {
                         ext.sharedResources->waitForListGPUWaits(InterpolatedListWaitMs);
-                        if (newerWorkloadQueued()) {
-                            skipWorkloadNow = true;
-                            {
-                                std::scoped_lock<std::mutex> managerLock(ext.sharedResources->interpolatedMutex);
-                                curFrameCounters.skipped = true;
-                            }
-
-                            displayTicks += lastWorkload.viOriginalRate * (displayFrames - (frame + 1));
-                            ext.sharedResources->interpolatedCondition.notify_all();
-                        }
                     }
 #               endif
 
