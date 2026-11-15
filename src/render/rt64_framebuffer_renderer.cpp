@@ -515,13 +515,13 @@ namespace RT64 {
         bool previousVertexTestZ = false;
         const RenderPipeline *previousPipeline = nullptr;
         RenderRect previousScissor;
-#   if RT64_EXACT_PRIM_DEPTH
-        float previousPrimDepth = -1.0f;
-#   endif
         interop::RasterParams rasterParams;
         RenderDescriptorSet *descRealFbSet = framebuffer.descRealFbSet->get();
         RenderDescriptorSet *descDummyFbSet = framebuffer.descDummyFbSet->get();
         const RenderDescriptorSet *previousDrawTextureSet = nullptr;
+#   if RT64_EXACT_PRIM_DEPTH
+        float previousPrimDepth = -1.0f;
+#   endif
 
         auto switchToGraphicsPipeline = [&]() {
             previousCallType = InstanceDrawCall::Type::Unknown;
