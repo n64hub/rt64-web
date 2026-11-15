@@ -260,5 +260,8 @@ namespace RT64 {
         void begin(uint64_t submissionFrame);
         bool addFramebufferPair(uint32_t colorAddress, uint8_t colorFmt, uint8_t colorSiz, uint16_t colorWidth, uint32_t depthAddress);
         int currentFramebufferPairIndex() const;
+#   if defined(__EMSCRIPTEN__)
+        void trimFramebufferPairs();
+#   endif
     };
 };

@@ -13,7 +13,45 @@ namespace RT64 {
 
     // Workload
 
+#if defined(__EMSCRIPTEN__)
+    // Shrinks a vector a workload refills whenever it holds more than twice what the workload's last use of it needed,
+    // and some to spare.
+    template<typename T>
+    static void trimVector(std::vector<T> &vector, size_t used, size_t spare) {
+        if (vector.capacity() > (used * 2 + spare)) {
+            vector.resize(std::min(vector.size(), used));
+            vector.shrink_to_fit();
+        }
+    }
+
+    void Workload::trimFramebufferPairs() {
+        // A workload slot keeps its framebuffer pairs, their projections and those projections' game calls when it is
+        // reused, each vector as large as any use of the slot ever made it at that index. A game that draws many small
+        // images a frame, each a pair of its own, with a varying number of projections and calls in each, ratchets
+        // every index up to the most any frame put there: Mario Tennis' page grew its fixed heap about 1 MB a second
+        // that way, mostly in vectors of game calls, until it ran out 5 minutes into a play. Each is trimmed to about
+        // what the slot's last use needed instead, which held that page's heap flat from its third minute.
+        const size_t pairsUsed = std::min<size_t>(fbPairCount, fbPairs.size());
+        for (size_t i = 0; i < fbPairs.size(); i++) {
+            FramebufferPair &fbPair = fbPairs[i];
+            const size_t projectionsUsed = (i < pairsUsed) ? std::min<size_t>(fbPair.projectionCount, fbPair.projections.size()) : 0;
+            for (size_t p = 0; p < fbPair.projections.size(); p++) {
+                Projection &proj = fbPair.projections[p];
+                const size_t callsUsed = (p < projectionsUsed) ? std::min<size_t>(proj.gameCallCount, proj.gameCalls.size()) : 0;
+                trimVector(proj.gameCalls, callsUsed, 16);
+            }
+
+            trimVector(fbPair.projections, projectionsUsed, 4);
+        }
+
+        trimVector(fbPairs, std::max<size_t>(pairsUsed, 1), 4);
+    }
+#endif
+
     void Workload::reset() {
+#   if defined(__EMSCRIPTEN__)
+        trimFramebufferPairs();
+#   endif
         submissionFrame = 0;
         fbPairCount = 0;
         fbPairSubmitted = 0;
