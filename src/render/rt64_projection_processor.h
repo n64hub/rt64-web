@@ -30,10 +30,8 @@ namespace RT64 {
         void processScene(const ProcessParams &p, const GameScene &scene, size_t sceneIndex);
         void upload(const ProcessParams &p);
 
-        // RT64_EXPAND_SCREEN_VERTICES: by workload index, the x scale processScene() gave each of its projections for a
-        // picture wider than 4:3 (1 where it gave none), and the workload's modifyPosUints with each screen x a game
-        // wrote (G_MODIFYVTX's XYSCREEN) scaled by its vertex's.
-        std::vector<std::vector<float>> expandRatioScales;
+        // RT64_EXPAND_SCREEN_VERTICES: by workload index, its modifyPosUints with each screen x a game wrote (G_MODIFYVTX's
+        // XYSCREEN) scaled as its vertex's projection was for a picture wider than 4:3.
         std::vector<std::vector<uint32_t>> expandModifyPosUints;
     };
 };
