@@ -12,7 +12,6 @@
 #include "gbi/rt64_f3d.h"
 #include "shared/rt64_rsp_fog.h"
 
-#include "rt64_frame_dump.h"
 #include "rt64_interpreter.h"
 #include "rt64_state.h"
 
@@ -1239,7 +1238,7 @@ namespace RT64 {
                 x1 = std::max(x1, float(posScreen[globalIndices[i]][0]));
             }
 
-            frameDump->addTriangle(x0, x1, float(viewport.translate.x) - halfWidth, 2.0f * halfWidth);
+            frameDump->addTriangle(&workload, x0, x1, float(viewport.translate.x) - halfWidth, 2.0f * halfWidth);
         }
 
         if (visibleTri && !scissorRect.isNull()) {

@@ -12,7 +12,6 @@
 #endif
 
 #include "rt64_workload_queue.h"
-#include "rt64_frame_dump.h"
 
 namespace RT64 {
     // PresentQueue
@@ -411,32 +410,15 @@ namespace RT64 {
                     viRenderer->render(renderParams);
                 }
 
-                // RT64_FRAME_DUMP: the frame shown, read back once this present's commands are done (rt64_frame_dump.h).
-                FrameDump *frameDump = FrameDump::get();
-                uint32_t dumpWidth = 0, dumpHeight = 0, dumpRowPitch = 0;
-                bool dumpSixteenBits = false;
-                if ((frameDump != nullptr) && (renderParams.texture != nullptr) && ((renderParams.textureFormat == RenderFormat::R8G8B8A8_UNORM) || (renderParams.textureFormat == RenderFormat::R16G16B16A16_UNORM))) {
-                    dumpWidth = renderParams.textureWidth;
-                    dumpHeight = renderParams.textureHeight;
-                    dumpSixteenBits = (renderParams.textureFormat == RenderFormat::R16G16B16A16_UNORM);
-                    const uint32_t pixelSize = dumpSixteenBits ? 8 : 4;
-                    dumpRowPitch = ((dumpWidth * pixelSize) + 255) & ~255U;
-                    const uint64_t dumpSize = uint64_t(dumpRowPitch) * dumpHeight;
-                    if ((dumpBuffer == nullptr) || (dumpBufferSize < dumpSize)) {
-                        dumpBuffer = ext.device->createBuffer(RenderBufferDesc::ReadbackBuffer(dumpSize));
-                        dumpBufferSize = dumpSize;
-                    }
-
-                    commandList->barriers(RenderBarrierStage::COPY, RenderTextureBarrier(renderParams.texture, RenderTextureLayout::COPY_SOURCE));
-                    commandList->barriers(RenderBarrierStage::COPY, RenderBufferBarrier(dumpBuffer.get(), RenderBufferAccess::WRITE));
-                    commandList->copyTextureRegion(RenderTextureCopyLocation::PlacedFootprint(dumpBuffer.get(), renderParams.textureFormat, dumpWidth, dumpHeight, 1, dumpRowPitch / pixelSize),
-                        RenderTextureCopyLocation::Subresource(renderParams.texture));
-                    commandList->barriers(RenderBarrierStage::GRAPHICS, RenderTextureBarrier(renderParams.texture, RenderTextureLayout::SHADER_READ));
-                }
-
                 RenderHookDraw *drawHook = GetRenderHookDraw();
                 if (drawHook != nullptr) {
                     drawHook(commandList, swapChainFramebuffer);
+                }
+
+                // RT64_FRAME_DUMP: the frame shown, read back for a test (rt64_frame_dump.h).
+                if (FrameDump *frameDump = FrameDump::get()) {
+                    frameDump->readback(ext.device, commandList, renderParams.texture, renderParams.textureFormat, renderParams.textureWidth,
+                        renderParams.textureHeight, present.presentId, uint32_t(i), uint32_t(framesToPresent));
                 }
 
                 {
@@ -452,14 +434,6 @@ namespace RT64 {
                     RenderCommandSemaphore *signalSemaphore = drawSemaphores[swapChainIndex].get();
                     ext.presentGraphicsWorker->commandQueue->executeCommandLists(&commandList, 1, &waitSemaphore, 1, &signalSemaphore, 1, ext.presentGraphicsWorker->commandFence.get());
                     ext.presentGraphicsWorker->wait();
-                }
-
-                if (dumpWidth > 0) {
-                    const uint8_t *dumpData = reinterpret_cast<const uint8_t *>(dumpBuffer->map());
-                    if (dumpData != nullptr) {
-                        frameDump->addFrame(present.presentId, uint32_t(i), uint32_t(framesToPresent), dumpData, dumpWidth, dumpHeight, dumpRowPitch, dumpSixteenBits);
-                        dumpBuffer->unmap();
-                    }
                 }
             }
 

@@ -15,6 +15,7 @@
 #include "rt64_application_window.h"
 #include "rt64_present.h"
 #include "rt64_shared_queue_resources.h"
+#include "rt64_frame_dump.h"
 
 #define PRESENT_QUEUE_SIZE 4
 
@@ -53,9 +54,6 @@ namespace RT64 {
         FramebufferChangePool screenFbChangePool;
         std::atomic<bool> viewRDRAM = false;
         std::vector<std::unique_ptr<RenderFramebuffer>> swapChainFramebuffers;
-        // RT64_FRAME_DUMP's readback of the frame shown (rt64_frame_dump.h).
-        std::unique_ptr<RenderBuffer> dumpBuffer;
-        uint64_t dumpBufferSize = 0;
         std::unique_ptr<RenderCommandSemaphore> acquiredSemaphore;
         std::vector<std::unique_ptr<RenderCommandSemaphore>> drawSemaphores;
         std::unique_ptr<VIRenderer> viRenderer;
