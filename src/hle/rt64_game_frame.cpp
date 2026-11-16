@@ -881,12 +881,6 @@ namespace RT64 {
             }
         };
 
-#if RT64_INTERPOLATE_RECT_SCROLLS
-        for (const std::pair<uint32_t, uint32_t> &drawnPair : drawnPairs) {
-            matchRectScrolls(workloadQueue.workloads[drawnPair.first], workloadQueue.workloads[drawnPair.second], frameMap.workloads[drawnPair.first], tileInterpolationUsed);
-        }
-#endif
-
         matchScenes(perspectiveScenes, prevFrame.perspectiveScenes);
         matchScenes(orthographicScenes, prevFrame.orthographicScenes);
 
@@ -911,6 +905,14 @@ namespace RT64 {
         else {
             velocityUploaderUsed = false;
         }
+
+        // The rects pair last: none of their tiles is one matchScene() maps, and tileInterpolationUsed is read once
+        // match() returns.
+#if RT64_INTERPOLATE_RECT_SCROLLS
+        for (const std::pair<uint32_t, uint32_t> &drawnPair : drawnPairs) {
+            matchRectScrolls(workloadQueue.workloads[drawnPair.first], workloadQueue.workloads[drawnPair.second], frameMap.workloads[drawnPair.first], tileInterpolationUsed);
+        }
+#endif
     }
 
     void GameFrame::matchScene(WorkloadQueue &workloadQueue, const GameFrame &prevFrame, const GameScene &curScene, const GameScene &prevScene, std::unordered_map<uint32_t, ModifiedBuffers> &workloadsModified, bool &tileInterpolationUsed, bool &lookAtInterpolationUsed) {
