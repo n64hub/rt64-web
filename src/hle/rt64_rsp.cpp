@@ -12,6 +12,7 @@
 #include "gbi/rt64_f3d.h"
 #include "shared/rt64_rsp_fog.h"
 
+#include "rt64_frame_dump.h"
 #include "rt64_interpreter.h"
 #include "rt64_state.h"
 
@@ -1224,6 +1225,21 @@ namespace RT64 {
             if (!viewportRect.isNull()) {
                 fbPair.viewportRect.merge(viewportRect);
             }
+        }
+
+        // RT64_FRAME_DUMP's sides.tsv: where across its view each triangle of the 3D world lies (rt64_frame_dump.h).
+        FrameDump *frameDump = FrameDump::get();
+        if ((frameDump != nullptr) && visibleTri && !unprojectable && (getCurrentProjectionType() == Projection::Type::Perspective)) {
+            const interop::RSPViewport &viewport = viewportStack[viewportStackSize - 1];
+            const float halfWidth = std::abs(float(viewport.scale.x));
+            float x0 = float(posScreen[globalIndices[0]][0]);
+            float x1 = x0;
+            for (int i = 1; i < 3; i++) {
+                x0 = std::min(x0, float(posScreen[globalIndices[i]][0]));
+                x1 = std::max(x1, float(posScreen[globalIndices[i]][0]));
+            }
+
+            frameDump->addTriangle(x0, x1, float(viewport.translate.x) - halfWidth, 2.0f * halfWidth);
         }
 
         if (visibleTri && !scissorRect.isNull()) {

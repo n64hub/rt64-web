@@ -4,6 +4,8 @@
 
 #include "rt64_state.h"
 
+#include "rt64_frame_dump.h"
+
 #include <cassert>
 #include <cinttypes>
 
@@ -3079,6 +3081,12 @@ namespace RT64 {
 
     void State::advanceWorkload(Workload &workload, bool paused) {
         workload.workloadId = ++workloadId;
+
+        // RT64_FRAME_DUMP's sides.tsv gets a line for the triangles this workload drew (rt64_frame_dump.h).
+        if (FrameDump *frameDump = FrameDump::get()) {
+            frameDump->endWorkload(workload.workloadId);
+        }
+
         workload.presentId = presentId;
         workload.debuggerCamera = debuggerInspector.camera;
         workload.debuggerRenderer = debuggerInspector.renderer;
