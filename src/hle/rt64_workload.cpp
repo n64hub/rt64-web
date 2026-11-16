@@ -119,8 +119,6 @@ namespace RT64 {
         drawData.modViewTransforms.clear();
         drawData.modProjTransforms.clear();
         drawData.modViewProjTransforms.clear();
-        drawData.projRatioScales.clear();
-        drawData.modModifyPosUints.clear();
         drawData.prevViewTransforms.clear();
         drawData.prevProjTransforms.clear();
         drawData.prevViewProjTransforms.clear();

@@ -48,11 +48,6 @@ namespace RT64 {
         std::vector<interop::float4x4> modViewTransforms;
         std::vector<interop::float4x4> modProjTransforms;
         std::vector<interop::float4x4> modViewProjTransforms;
-
-        // RT64_EXPAND_SCREEN_VERTICES: the scale each projection's x was given for the aspect ratio (1 where it was given
-        // none), and modifyPosUints with each screen x a game wrote (G_MODIFYVTX's XYSCREEN) scaled by its vertex's.
-        std::vector<float> projRatioScales;
-        std::vector<uint32_t> modModifyPosUints;
         std::vector<interop::float4x4> prevViewTransforms;
         std::vector<interop::float4x4> prevProjTransforms;
         std::vector<interop::float4x4> prevViewProjTransforms;
