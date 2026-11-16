@@ -29,6 +29,7 @@ option(RT64_KEEP_THIN_RECTS "Leave a rect one pixel tall or wide as the game dre
 option(RT64_EXACT_PRIM_DEPTH "Draw a G_ZS_PRIM triangle through a perspective or orthographic projection at exactly its prim depth, by a viewport depth range of no height, not at the vertex shader's z = primDepth * w, which the perspective divide leaves an ulp off on some vertices, so that under a strict depth test only the first of its triangles to cover a pixel draws there, as on the console (always on with Emscripten)" OFF)
 option(RT64_SKIP_CAMERA_CUTS "Pair nothing across a camera the game gives no matrix group of its own that cut to another shot between two game frames (it turned more than 45 degrees, or its eye jumped more than 8 near plane distances and 4 times its last step), nor anything its scene draws, so the frames between draw the new shot as it is, not the world halfway between two places (always on with Emscripten)" OFF)
 option(RT64_SKIP_PLACE_SWAPS "Never pair a transform with one of the game frame before at another place when both frames drew something at both places, so that a model the game draws at many places, in another order or with another call each frame, is not interpolated from one of its places to another (always on with Emscripten)" OFF)
+option(RT64_INTERPOLATE_RECT_SCROLLS "Pair a texrect with one of the game frame before that drew the same place with the same textures, and when its texture only scrolled inside it, by less than a quarter of what it spans, slide the texture there in the frames between, as a scroll on a 3D draw is, so that a background the game draws as 2D strips and scrolls as the camera turns (a horizon panorama) moves on every frame with the world in front of it, not a step a game frame (always on with Emscripten)" OFF)
 
 if (NOT ${RT64_STATIC})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -579,6 +580,9 @@ if (RT64_SKIP_CAMERA_CUTS OR RT64_WGSL)
 endif()
 if (RT64_SKIP_PLACE_SWAPS OR RT64_WGSL)
     target_compile_definitions(rt64 PRIVATE RT64_SKIP_PLACE_SWAPS=1)
+endif()
+if (RT64_INTERPOLATE_RECT_SCROLLS OR RT64_WGSL)
+    target_compile_definitions(rt64 PRIVATE RT64_INTERPOLATE_RECT_SCROLLS=1)
 endif()
 
 # Add common libraries.

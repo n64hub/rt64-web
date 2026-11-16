@@ -524,6 +524,169 @@ namespace RT64 {
     }
 #endif
 
+#if RT64_INTERPOLATE_RECT_SCROLLS
+    // A rectangle (a texrect, drawn without a viewport) is never paired with one of the game frame before, so a
+    // texture the game scrolls inside a rect that stays put (a horizon panorama that turns with the camera, a sky or a
+    // menu's backdrop) steps once a game frame, while the world interpolated around it moves on every frame. Each rect
+    // here is paired with the next of the frame before's in its order that drew the same place with the same textures
+    // (its rect, scale and tiles, and each tile's TMEM hash), and when every corner's texcoords moved by the same
+    // amount, not nothing and less than a quarter of the texels the rect spans in each direction (a step across a
+    // wrapped tile's period taken inside it), its tiles are placed that much back in the frame before, so the tile
+    // processor slides the texture there in the frames between. A rect that moved, changed size or texture, or whose
+    // texture jumped (another glyph of a font, another frame of an animation) is drawn where the game put it.
+    static void matchRectScrolls(const Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &workloadMap, bool &tileInterpolationUsed) {
+        struct RectCall {
+            const DrawCall *call;
+            uint32_t rawVertex;
+        };
+
+        auto collect = [](const Workload &workload, std::vector<RectCall> &rects) {
+            rects.clear();
+            uint32_t rawVertex = 0;
+            const size_t rawVertexCount = workload.drawData.triTcFloats.size() / 2;
+            for (uint32_t f = 0; f < workload.fbPairCount; f++) {
+                const FramebufferPair &fbPair = workload.fbPairs[f];
+                for (uint32_t p = 0; p < fbPair.projectionCount; p++) {
+                    const Projection &proj = fbPair.projections[p];
+                    if (proj.usesViewport()) {
+                        continue;
+                    }
+
+                    for (uint32_t c = 0; c < proj.gameCallCount; c++) {
+                        const DrawCall &call = proj.gameCalls[c].callDesc;
+                        const bool oneRect = (call.triangleCount == 2) && ((rawVertex + 6) <= rawVertexCount);
+                        if ((proj.type == Projection::Type::Rectangle) && oneRect && call.textureOn && (call.tileCount > 0) && (call.tileCount <= 8)) {
+                            rects.push_back({ &call, rawVertex });
+                        }
+
+                        rawVertex += call.triangleCount * 3;
+                    }
+                }
+            }
+        };
+
+        thread_local std::vector<RectCall> curRects;
+        thread_local std::vector<RectCall> prevRects;
+        thread_local std::vector<bool> prevUsed;
+        collect(curWorkload, curRects);
+        collect(prevWorkload, prevRects);
+        prevUsed.assign(prevRects.size(), false);
+
+        const DrawData &curData = curWorkload.drawData;
+        const DrawData &prevData = prevWorkload.drawData;
+        auto sameRect = [&](const DrawCall &a, const DrawCall &b) {
+            if ((a.rect.ulx != b.rect.ulx) || (a.rect.uly != b.rect.uly) || (a.rect.lrx != b.rect.lrx) || (a.rect.lry != b.rect.lry) ||
+                (a.rectDsdx != b.rectDsdx) || (a.rectDtdy != b.rectDtdy) || (a.tileCount != b.tileCount))
+            {
+                return false;
+            }
+
+            for (uint32_t t = 0; t < a.tileCount; t++) {
+                const interop::RDPTile &ta = curData.rdpTiles[a.tileIndex + t];
+                const interop::RDPTile &tb = prevData.rdpTiles[b.tileIndex + t];
+                if ((curData.callTiles[a.tileIndex + t].tmemHashOrID != prevData.callTiles[b.tileIndex + t].tmemHashOrID) ||
+                    (ta.fmt != tb.fmt) || (ta.siz != tb.siz) || (ta.palette != tb.palette) || (ta.masks != tb.masks) || (ta.maskt != tb.maskt) ||
+                    (ta.cms != tb.cms) || (ta.cmt != tb.cmt) || (ta.shifts != tb.shifts) || (ta.shiftt != tb.shiftt) ||
+                    (ta.uls != tb.uls) || (ta.ult != tb.ult) || (ta.lrs != tb.lrs) || (ta.lrt != tb.lrt))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        };
+
+        // A step in a tile's texels, taken inside its period when it wraps or mirrors.
+        auto insidePeriod = [](float step, int mask, int cm) {
+            const float period = float(mask) * ((cm & G_TX_MIRROR) ? 2.0f : 1.0f);
+            if ((cm & G_TX_CLAMP) || (period <= 0.0f)) {
+                return step;
+            }
+
+            step = fmodf(step, period);
+            if (step > (period / 2.0f)) {
+                step -= period;
+            }
+            else if (step < -(period / 2.0f)) {
+                step += period;
+            }
+
+            return step;
+        };
+
+        size_t searchStart = 0;
+        for (const RectCall &curRect : curRects) {
+            const DrawCall &curCall = *curRect.call;
+            size_t found = prevRects.size();
+            for (size_t i = 0; i < prevRects.size(); i++) {
+                const size_t j = (searchStart + i) % prevRects.size();
+                if (!prevUsed[j] && sameRect(curCall, *prevRects[j].call)) {
+                    found = j;
+                    break;
+                }
+            }
+
+            if (found == prevRects.size()) {
+                continue;
+            }
+
+            prevUsed[found] = true;
+            searchStart = found + 1;
+
+            const float *curTc = &curData.triTcFloats[curRect.rawVertex * 2];
+            const float *prevTc = &prevData.triTcFloats[prevRects[found].rawVertex * 2];
+            const float ds = curTc[0] - prevTc[0];
+            const float dt = curTc[1] - prevTc[1];
+            bool together = true;
+            for (uint32_t v = 1; (v < 6) && together; v++) {
+                together = (fabsf((curTc[v * 2 + 0] - prevTc[v * 2 + 0]) - ds) < 1.0e-3f) && (fabsf((curTc[v * 2 + 1] - prevTc[v * 2 + 1]) - dt) < 1.0e-3f);
+            }
+
+            if (!together) {
+                continue;
+            }
+
+            // The texels the rect spans in each direction: its size in pixels times its texels a pixel.
+            const float spanS = (float(curCall.rect.lrx - curCall.rect.ulx) / 4.0f) * (fabsf(float(curCall.rectDsdx)) / 1024.0f);
+            const float spanT = (float(curCall.rect.lry - curCall.rect.uly) / 4.0f) * (fabsf(float(curCall.rectDtdy)) / 1024.0f);
+            float stepS[8];
+            float stepT[8];
+            bool scrolled = false;
+            bool slides = true;
+            for (uint32_t t = 0; (t < curCall.tileCount) && slides; t++) {
+                const interop::RDPTile &tile = curData.rdpTiles[curCall.tileIndex + t];
+                stepS[t] = insidePeriod(ds * tile.shifts, tile.masks, tile.cms);
+                stepT[t] = insidePeriod(dt * tile.shiftt, tile.maskt, tile.cmt);
+                slides = ((stepS[t] == 0.0f) || (fabsf(stepS[t]) < (spanS * tile.shifts / 4.0f))) &&
+                    ((stepT[t] == 0.0f) || (fabsf(stepT[t]) < (spanT * tile.shiftt / 4.0f)));
+                scrolled = scrolled || (stepS[t] != 0.0f) || (stepT[t] != 0.0f);
+            }
+
+            if (!slides || !scrolled) {
+                continue;
+            }
+
+            // A tile's corners are in quarter texels, and the shader subtracts them from the texcoords it scaled.
+            for (uint32_t t = 0; t < curCall.tileCount; t++) {
+                const uint32_t tileIndex = curCall.tileIndex + t;
+                const interop::RDPTile &tile = curData.rdpTiles[tileIndex];
+                GameFrameMap::TileMap &tileMap = workloadMap.tiles[tileIndex];
+                tileMap.curUls = tile.uls;
+                tileMap.curUlt = tile.ult;
+                tileMap.curLrs = tile.lrs;
+                tileMap.curLrt = tile.lrt;
+                tileMap.prevUls = tile.uls + stepS[t] * 4.0f;
+                tileMap.prevUlt = tile.ult + stepT[t] * 4.0f;
+                tileMap.prevLrs = tile.lrs + stepS[t] * 4.0f;
+                tileMap.prevLrt = tile.lrt + stepT[t] * 4.0f;
+                tileMap.mapped = true;
+            }
+
+            tileInterpolationUsed = true;
+        }
+    }
+#endif
+
     void GameFrame::match(RenderWorker *worker, WorkloadQueue &workloadQueue, const GameFrame &prevFrame, BufferUploader *velocityUploader, bool &velocityUploaderUsed, bool &tileInterpolationUsed, bool &lookAtInterpolationUsed) {
         tileInterpolationUsed = false;
         lookAtInterpolationUsed = false;
@@ -720,6 +883,12 @@ namespace RT64 {
 
         matchScenes(perspectiveScenes, prevFrame.perspectiveScenes);
         matchScenes(orthographicScenes, prevFrame.orthographicScenes);
+
+#if RT64_INTERPOLATE_RECT_SCROLLS
+        for (const std::pair<uint32_t, uint32_t> &drawnPair : drawnPairs) {
+            matchRectScrolls(workloadQueue.workloads[drawnPair.first], workloadQueue.workloads[drawnPair.second], frameMap.workloads[drawnPair.first], tileInterpolationUsed);
+        }
+#endif
 
         if (!workloadsModified.empty()) {
             thread_local std::vector<BufferUploader::Upload> uploads;
