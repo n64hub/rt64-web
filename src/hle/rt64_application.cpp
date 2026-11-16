@@ -838,7 +838,40 @@ namespace RT64 {
     // configuration and the window are kept, and so is what a caller set on the state; a render hook's objects are made
     // again with the replace device hook (rt64_render_hooks.h), not the deinit and init hooks. PLUME_LOSE_DEVICE_AFTER
     // tests it on a desktop build (plume's plume_lost_device_test.h).
+    //
+    // On a desktop build a device that replaced a lost one and is lost too within ReplacedDeviceLostForGoodSeconds of
+    // being made isn't replaced, and neither is one whose replacement can't be set up: the GPU stops responding to what
+    // the game draws, or the driver can't recover, and replacing it again only loops. A Windows player's Rush 2049, its
+    // GPU hung in a race, lost each replacement within seconds and showed a frozen picture, which the window's close,
+    // asking first in a prompt drawn on it, couldn't end. The game ends instead, with a message box saying why and what
+    // may help. A page's browser decides this for itself (plume's plume_webgpu_device.js).
+    static const int ReplacedDeviceLostForGoodSeconds = 60;
+
+    void Application::endForLostDevice(const char *reason) {
+        fprintf(stderr, "RT64: %s; the game ends.\n", reason);
+#   ifndef __EMSCRIPTEN__
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Graphics device lost",
+            "The game lost its graphics device and couldn't go on with a new one, so it has to close.\n\n"
+            "Updating the graphics driver may help, or choosing the other Graphics API in the Graphics settings.", nullptr);
+#   endif
+        fflush(stdout);
+        fflush(stderr);
+        std::_Exit(EXIT_FAILURE);
+    }
+
     void Application::replaceLostDevice() {
+#   ifndef __EMSCRIPTEN__
+        if (lostDeviceReplacedTime.has_value()) {
+            const auto age = std::chrono::steady_clock::now() - *lostDeviceReplacedTime;
+            if (age < std::chrono::seconds(ReplacedDeviceLostForGoodSeconds)) {
+                char reason[128];
+                snprintf(reason, sizeof(reason), "the graphics device that replaced a lost one was lost too, %d s after it was made",
+                    int(std::chrono::duration_cast<std::chrono::seconds>(age).count()));
+                endForLostDevice(reason);
+            }
+        }
+#   endif
+
         fprintf(stderr, "RT64: the graphics device was lost; starting again on a new one.\n");
         std::atomic<uint32_t> *displayListReads = state->displayListReads;
         replacingDevice = true;
@@ -847,10 +880,14 @@ namespace RT64 {
         replacingDevice = false;
         if (result != SetupResult::Success) {
             fprintf(stderr, "RT64 could not start again on a new graphics device (%d).\n", int(result));
+#       ifndef __EMSCRIPTEN__
+            endForLostDevice("no new graphics device could be set up");
+#       endif
             abort();
         }
 
         state->displayListReads = displayListReads;
+        lostDeviceReplacedTime = std::chrono::steady_clock::now();
         fprintf(stderr, "RT64: going on with the new device.\n");
     }
 

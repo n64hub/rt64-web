@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <chrono>
+#include <optional>
 #include <sstream>
 #include <filesystem>
 
@@ -143,6 +145,8 @@ namespace RT64 {
         uint32_t threadsAvailable;
         uint32_t setupThreadId = 0;
         bool replacingDevice = false;
+        // When replaceLostDevice() last set up a device in place of a lost one; nothing until it first does.
+        std::optional<std::chrono::steady_clock::time_point> lostDeviceReplacedTime;
         ProfilingTimer dlApiProfiler = ProfilingTimer(120);
         ProfilingTimer screenApiProfiler = ProfilingTimer(120);
 
@@ -170,6 +174,7 @@ namespace RT64 {
         void updateMultisampling();
         void end();
         void replaceLostDevice();
+        [[noreturn]] void endForLostDevice(const char *reason);
         bool loadConfiguration();
         bool saveConfiguration();
         bool checkDirectoryCreated(const std::filesystem::path &path);
