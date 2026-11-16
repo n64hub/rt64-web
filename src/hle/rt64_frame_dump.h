@@ -46,6 +46,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -114,6 +115,11 @@ namespace RT64 {
 
                 FrameDump *d = new FrameDump();
                 d->dir = variable;
+
+                // The folder is made if it isn't there, so a first run writes its dump rather than saying where it can't.
+                std::error_code error;
+                std::filesystem::create_directories(std::filesystem::path(d->dir), error);
+
                 const char *seconds = getenv("RT64_FRAME_DUMP_SECONDS");
                 if (seconds != nullptr) {
                     sscanf(seconds, "%lf-%lf", &d->fromSeconds, &d->toSeconds);
