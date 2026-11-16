@@ -881,14 +881,14 @@ namespace RT64 {
             }
         };
 
-        matchScenes(perspectiveScenes, prevFrame.perspectiveScenes);
-        matchScenes(orthographicScenes, prevFrame.orthographicScenes);
-
 #if RT64_INTERPOLATE_RECT_SCROLLS
         for (const std::pair<uint32_t, uint32_t> &drawnPair : drawnPairs) {
             matchRectScrolls(workloadQueue.workloads[drawnPair.first], workloadQueue.workloads[drawnPair.second], frameMap.workloads[drawnPair.first], tileInterpolationUsed);
         }
 #endif
+
+        matchScenes(perspectiveScenes, prevFrame.perspectiveScenes);
+        matchScenes(orthographicScenes, prevFrame.orthographicScenes);
 
         if (!workloadsModified.empty()) {
             thread_local std::vector<BufferUploader::Upload> uploads;
