@@ -164,6 +164,8 @@ namespace RT64 {
             RenderWorker *worker;
             RenderFramebufferStorage *fbStorage;
             const Workload *curWorkload;
+            const std::vector<hlslpp::float2> *rectMoves = nullptr; // RT64_INTERPOLATE_RECT_SCROLLS (GameFrameMap::WorkloadMap).
+            float curFrameWeight = 1.0f;
             uint32_t fbPairIndex;
             uint32_t fbWidth;
             uint32_t fbHeight;
@@ -184,8 +186,6 @@ namespace RT64 {
             bool postBlendNoise;
             bool postBlendNoiseNegative;
             uint32_t maxGameCall;
-            const std::vector<hlslpp::float2> *rectMoves = nullptr; // RT64_INTERPOLATE_RECT_SCROLLS (GameFrameMap::WorkloadMap).
-            float curFrameWeight = 1.0f;
         };
 
         FramebufferRenderer(RenderWorker *worker, bool rtSupport, UserConfiguration::GraphicsAPI graphicsAPI, const ShaderLibrary *shaderLibrary);

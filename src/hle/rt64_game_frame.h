@@ -90,6 +90,9 @@ namespace RT64 {
         };
 
         struct WorkloadMap {
+            // RT64_INTERPOLATE_RECT_SCROLLS: by a rect's call index, how far from where this frame draws it the frame
+            // before drew it, in pixels, for one that moved and changed nothing else; empty past the last that moved.
+            std::vector<hlslpp::float2> rectMoves;
             std::vector<ViewProjectionMap> viewProjections;
             std::vector<TransformMap> transforms;
             std::vector<TileMap> tiles;
@@ -97,10 +100,6 @@ namespace RT64 {
             std::vector<bool> prevTransformsMapped;
             std::vector<bool> prevTilesMapped;
             std::vector<bool> prevLookAtMapped;
-
-            // RT64_INTERPOLATE_RECT_SCROLLS: by a rect's call index, how far from where this frame draws it the frame
-            // before drew it, in pixels, for one that moved and changed nothing else; empty past the last that moved.
-            std::vector<hlslpp::float2> rectMoves;
             uint32_t prevWorkloadIndex = 0;
             bool mapped = false;
         };
