@@ -536,8 +536,9 @@ namespace RT64 {
     // texcoords moved by the same amount, less than a quarter of the texels the rect spans in each direction (a step
     // across a wrapped tile's period taken inside it), its tiles are placed that much back in the frame before, so the
     // tile processor slides the texture there in the frames between, and a rect that moved is drawn that much nearer
-    // where it stood (rectMoves, which the framebuffer renderer reads). A rect that changed size or texture, or whose
-    // texture jumped (another glyph of a font, another frame of an animation), is drawn where the game put it.
+    // where it stood (rectMoves, which the framebuffer renderer reads). A rect whose texture jumped (another glyph of a
+    // font, another frame of an animation) shows its new texels unslid, and is still drawn nearer where it stood when it
+    // moved. A rect that changed size or texture is drawn where the game put it.
     static void matchRectScrolls(const Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &workloadMap, bool &tileInterpolationUsed) {
         struct RectCall {
             const DrawCall *call;
@@ -708,10 +709,12 @@ namespace RT64 {
             }
 
             const bool moved = (prevCall.rect.ulx != curCall.rect.ulx) || (prevCall.rect.uly != curCall.rect.uly);
-            if (!slides || (!scrolled && !moved)) {
+            if (!moved && (!slides || !scrolled)) {
                 continue;
             }
 
+            // Whether its texture slides or jumps: a sprite the game moves and animates by stepping its texcoords
+            // across a strip of its frames jumps a frame at a time, and moves on every game frame.
             if (moved) {
                 if (workloadMap.rectMoves.size() <= curCall.callIndex) {
                     workloadMap.rectMoves.resize(curCall.callIndex + 1, hlslpp::float2(0.0f, 0.0f));
@@ -720,7 +723,7 @@ namespace RT64 {
                 workloadMap.rectMoves[curCall.callIndex] = hlslpp::float2(float(prevCall.rect.ulx - curCall.rect.ulx), float(prevCall.rect.uly - curCall.rect.uly)) / 4.0f;
             }
 
-            if (!scrolled) {
+            if (!slides || !scrolled) {
                 continue;
             }
 
