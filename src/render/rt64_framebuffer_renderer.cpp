@@ -82,21 +82,16 @@ namespace RT64 {
                 }
             };
 
-            // An edge a float's rounding leaves just short of or past a whole pixel is on that pixel: the 4:3 picture's
-            // scaled into a 16:9 window (a ratio of 0.75000006) put a scissor's left edge at x 8 on 367.99994 of 2560,
-            // which floored to 367, a column of a triangle under it drawn left of the rects beside it.
-            auto floorPixel = [](float coord) {
-                const float nearest = std::round(coord);
-                return static_cast<int32_t>((std::fabs(coord - nearest) < 1.0e-3f) ? nearest : std::floor(coord));
-            };
-
-            auto ceilPixel = [](float coord) {
-                const float nearest = std::round(coord);
-                return static_cast<int32_t>((std::fabs(coord - nearest) < 1.0e-3f) ? nearest : std::ceil(coord));
-            };
-
-            int32_t left = floorPixel((computeOrigin(leftOrigin) + (rect.left(true) - computeOrigin(leftOrigin)) * aspectRatioScale) * resScale.x);
-            int32_t right = ceilPixel((computeOrigin(rightOrigin) + (rect.right(true) - computeOrigin(rightOrigin)) * aspectRatioScale) * resScale.x);
+            // Each side is on the pixel nearest it, as a rect's are (convertViewportRect) and as the top and bottom are,
+            // so a scissor and a rect with a side at the same x put it on the same column. Floored on the left and
+            // ceiled on the right, a scissor took in the column a side only partly reaches, which the rect beside it
+            // leaves out: where the picture's scale puts x 8 off a whole pixel (7.1125 pixels each in a 2276-wide
+            // picture, 8 on 56.9), a triangle under the 3D's scissor drew a column past a rect drawn over the
+            // scissor's whole width to cover it, a line of the 3D down each side of a screen that is black; and an
+            // edge a float's rounding leaves a hair short of a whole pixel (8 on 367.99994 of 2560, from a ratio of
+            // 0.75000006) floored to the column before it.
+            int32_t left = lround((computeOrigin(leftOrigin) + (rect.left(true) - computeOrigin(leftOrigin)) * aspectRatioScale) * resScale.x);
+            int32_t right = lround((computeOrigin(rightOrigin) + (rect.right(true) - computeOrigin(rightOrigin)) * aspectRatioScale) * resScale.x);
             int32_t top = lround(rect.top(true) * resScale.y);
             int32_t bottom = lround(rect.bottom(true) * resScale.y);
             left = correctMisalignment(left, leftOrigin);
