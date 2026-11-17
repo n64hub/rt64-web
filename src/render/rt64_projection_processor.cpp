@@ -7,8 +7,6 @@
 #include "common/rt64_math.h"
 #include "hle/rt64_workload_queue.h"
 
-#include <algorithm>
-
 namespace RT64 {
 #if RT64_INTERPOLATE_CAMERA_EYE
     // The eye of a view matrix, the point it moves to the origin, or false for a view without one (a zero matrix).
@@ -177,122 +175,6 @@ namespace RT64 {
         }
     }
 
-#if RT64_INTERPOLATE_SCREEN_VERTICES
-    // A screen position a game writes into a vertex itself (G_MODIFYVTX's XYSCREEN) is the game frame's own, and
-    // RSPModifyCS puts it over the interpolated one in every frame drawn between the game's: what a game projects
-    // itself and writes where it lands (Mario Golf's pin flagstick and its flag) stood still a game frame at a time
-    // while the course around it, drawn between, moved on every frame, and shook against it as the camera moved, the
-    // more the more frames the display draws a game frame (four at 120 Hz to a game of 30). Each write is paired with
-    // one the frame before made, in the order the game wrote them, among the writes to vertices of one projection: the
-    // one process() interpolates its camera from (its viewProjections map) where that one has as many, or else the
-    // frame before's in the same place among the projections written through, where both frames wrote through as many
-    // and that one as many. A game loads the same camera more than once a frame and in a varying number, so the map
-    // can pair a projection with an equal one the writes didn't go through (Mario Golf's flagstick writes, through its
-    // sixth projection, which the map paired with the frame before's third, of none). Each pair is drawn between its
-    // two by the frame's weight, in the quarter pixels the RSP takes. A projection the map pairs with none (a camera
-    // cut, RT64_SKIP_CAMERA_CUTS) leaves its writes the game's, and so does a pair further apart than half the view,
-    // which is no motion of one thing between two frames. Returns whether any write was paired, so the copy is
-    // uploaded in every present of the frame, its last (weight 1) included, which puts the game's own positions back
-    // over the frames between.
-    static bool interpolateScreenWrites(const ProjectionProcessor::ProcessParams &p, uint32_t w, std::vector<uint32_t> &modifyPosUints) {
-        const Workload &workload = p.workloadQueue->workloads[w];
-        const GameFrameMap::WorkloadMap &workloadMap = p.curFrame->frameMap.workloads[w];
-        if ((p.prevFrame == nullptr) || !workloadMap.mapped || workload.debuggerCamera.enabled) {
-            return false;
-        }
-
-        const Workload &prevWorkload = p.workloadQueue->workloads[workloadMap.prevWorkloadIndex];
-        const DrawData &curData = workload.drawData;
-        const DrawData &prevData = prevWorkload.drawData;
-
-        // Each projection's XYSCREEN writes, by their place in modifyPosUints, in the order the game made them, the
-        // projections in the order the game first wrote through each.
-        typedef std::vector<std::pair<uint32_t, std::vector<size_t>>> ScreenWrites;
-        auto collect = [](const DrawData &drawData, ScreenWrites &writes) {
-            writes.clear();
-            for (size_t m = 0; (m + 1) < drawData.modifyPosUints.size(); m += 2) {
-                const uint32_t target = drawData.modifyPosUints[m];
-                const uint32_t vertexIndex = target >> 1;
-                if (((target & 0x1) != 0) || (vertexIndex >= drawData.viewProjIndices.size())) {
-                    continue;
-                }
-
-                const uint32_t t = drawData.viewProjIndices[vertexIndex];
-                auto it = std::find_if(writes.begin(), writes.end(), [t](const auto &group) { return group.first == t; });
-                if (it == writes.end()) {
-                    writes.emplace_back(t, std::vector<size_t>());
-                    it = writes.end() - 1;
-                }
-
-                it->second.push_back(m);
-            }
-        };
-
-        thread_local ScreenWrites curWrites;
-        thread_local ScreenWrites prevWrites;
-        collect(curData, curWrites);
-        if (curWrites.empty()) {
-            return false;
-        }
-
-        collect(prevData, prevWrites);
-        bool pairedAny = false;
-        for (size_t g = 0; g < curWrites.size(); g++) {
-            const uint32_t t = curWrites[g].first;
-            const std::vector<size_t> &curGroup = curWrites[g].second;
-            if ((t >= workloadMap.viewProjections.size()) || !workloadMap.viewProjections[t].mapped || (t >= curData.rspViewports.size())) {
-                continue;
-            }
-
-            const uint32_t prevT = workloadMap.viewProjections[t].prevTransformIndex;
-            const std::vector<size_t> *prevGroup = nullptr;
-            for (const auto &group : prevWrites) {
-                if ((group.first == prevT) && (group.second.size() == curGroup.size())) {
-                    prevGroup = &group.second;
-                    break;
-                }
-            }
-
-            if ((prevGroup == nullptr) && (prevWrites.size() == curWrites.size()) && (prevWrites[g].second.size() == curGroup.size())) {
-                prevGroup = &prevWrites[g].second;
-            }
-
-            if (prevGroup == nullptr) {
-                continue;
-            }
-
-            const interop::RSPViewport &viewport = curData.rspViewports[t];
-            const float maxDx = std::abs(float(viewport.scale.x)) * 4.0f;
-            const float maxDy = std::abs(float(viewport.scale.y)) * 4.0f;
-            for (size_t k = 0; k < curGroup.size(); k++) {
-                const size_t m = curGroup[k];
-                const uint32_t curValue = curData.modifyPosUints[m + 1];
-                const uint32_t prevValue = prevData.modifyPosUints[(*prevGroup)[k] + 1];
-                const float curX = float(int16_t((curValue >> 16) & 0xFFFF));
-                const float curY = float(int16_t(curValue & 0xFFFF));
-                const float prevX = float(int16_t((prevValue >> 16) & 0xFFFF));
-                const float prevY = float(int16_t(prevValue & 0xFFFF));
-                if ((std::abs(curX - prevX) > maxDx) || (std::abs(curY - prevY) > maxDy)) {
-                    continue;
-                }
-
-                auto quarters = [](float v) {
-                    int32_t rounded = int32_t(v + ((v >= 0.0f) ? 0.5f : -0.5f));
-                    rounded = (rounded < -32768) ? -32768 : ((rounded > 32767) ? 32767 : rounded);
-                    return uint32_t(uint16_t(int16_t(rounded)));
-                };
-
-                const float x = prevX + (curX - prevX) * p.curFrameWeight;
-                const float y = prevY + (curY - prevY) * p.curFrameWeight;
-                modifyPosUints[m + 1] = (quarters(x) << 16) | quarters(y);
-                pairedAny = true;
-            }
-        }
-
-        return pairedAny;
-    }
-#endif
-
     void ProjectionProcessor::upload(const ProcessParams &p) {
         uploads.clear();
 #   if RT64_EXPAND_SCREEN_VERTICES || RT64_INTERPOLATE_SCREEN_VERTICES
@@ -303,7 +185,7 @@ namespace RT64 {
         // hole) and from the 2D the game put at the same spot (the pin's marker). Each written x is scaled toward its
         // viewport's centre by its vertex's projection's scale, as its projected vertices are, and the scaled copy is
         // uploaded over what the workload uploaded only where one was scaled. With RT64_INTERPOLATE_SCREEN_VERTICES
-        // each write is drawn between the frame before's and its own first (interpolateScreenWrites()), and that is
+        // each write is drawn between the frame before's and its own first (interpolateScreenWrites(), at the end of this file), and that is
         // what is scaled.
         //
         // The scale is read from the projection process() made, not noted as it was made, since games' own changes to
@@ -390,4 +272,123 @@ namespace RT64 {
 
         bufferUploader->submit(p.worker, uploads);
     }
+
+#if RT64_INTERPOLATE_SCREEN_VERTICES
+    // A screen position a game writes into a vertex itself (G_MODIFYVTX's XYSCREEN) is the game frame's own, and
+    // RSPModifyCS puts it over the interpolated one in every frame drawn between the game's: what a game projects
+    // itself and writes where it lands (Mario Golf's pin flagstick and its flag) stood still a game frame at a time
+    // while the course around it, drawn between, moved on every frame, and shook against it as the camera moved, the
+    // more the more frames the display draws a game frame (four at 120 Hz to a game of 30). Each write is paired with
+    // one the frame before made, in the order the game wrote them, among the writes to vertices of one projection: the
+    // one process() interpolates its camera from (its viewProjections map) where that one has as many, or else the
+    // frame before's in the same place among the projections written through, where both frames wrote through as many
+    // and that one as many. A game loads the same camera more than once a frame and in a varying number, so the map
+    // can pair a projection with an equal one the writes didn't go through (Mario Golf's flagstick writes, through its
+    // sixth projection, which the map paired with the frame before's third, of none). Each pair is drawn between its
+    // two by the frame's weight, in the quarter pixels the RSP takes. A projection the map pairs with none (a camera
+    // cut, RT64_SKIP_CAMERA_CUTS) leaves its writes the game's, and so does a pair further apart than half the view,
+    // which is no motion of one thing between two frames. Returns whether any write was paired, so the copy is
+    // uploaded in every present of the frame, its last (weight 1) included, which puts the game's own positions back
+    // over the frames between.
+    bool ProjectionProcessor::interpolateScreenWrites(const ProcessParams &p, uint32_t w, std::vector<uint32_t> &modifyPosUints) {
+        const Workload &workload = p.workloadQueue->workloads[w];
+        const GameFrameMap::WorkloadMap &workloadMap = p.curFrame->frameMap.workloads[w];
+        if ((p.prevFrame == nullptr) || !workloadMap.mapped || workload.debuggerCamera.enabled) {
+            return false;
+        }
+
+        const Workload &prevWorkload = p.workloadQueue->workloads[workloadMap.prevWorkloadIndex];
+        const DrawData &curData = workload.drawData;
+        const DrawData &prevData = prevWorkload.drawData;
+
+        // Each projection's XYSCREEN writes, by their place in modifyPosUints, in the order the game made them, the
+        // projections in the order the game first wrote through each.
+        typedef std::vector<std::pair<uint32_t, std::vector<size_t>>> ScreenWrites;
+        auto collect = [](const DrawData &drawData, ScreenWrites &writes) {
+            writes.clear();
+            for (size_t m = 0; (m + 1) < drawData.modifyPosUints.size(); m += 2) {
+                const uint32_t target = drawData.modifyPosUints[m];
+                const uint32_t vertexIndex = target >> 1;
+                if (((target & 0x1) != 0) || (vertexIndex >= drawData.viewProjIndices.size())) {
+                    continue;
+                }
+
+                const uint32_t t = drawData.viewProjIndices[vertexIndex];
+                size_t g = 0;
+                while ((g < writes.size()) && (writes[g].first != t)) {
+                    g++;
+                }
+
+                if (g == writes.size()) {
+                    writes.emplace_back(t, std::vector<size_t>());
+                }
+
+                writes[g].second.push_back(m);
+            }
+        };
+
+        thread_local ScreenWrites curWrites;
+        thread_local ScreenWrites prevWrites;
+        collect(curData, curWrites);
+        if (curWrites.empty()) {
+            return false;
+        }
+
+        collect(prevData, prevWrites);
+        bool pairedAny = false;
+        for (size_t g = 0; g < curWrites.size(); g++) {
+            const uint32_t t = curWrites[g].first;
+            const std::vector<size_t> &curGroup = curWrites[g].second;
+            if ((t >= workloadMap.viewProjections.size()) || !workloadMap.viewProjections[t].mapped || (t >= curData.rspViewports.size())) {
+                continue;
+            }
+
+            const uint32_t prevT = workloadMap.viewProjections[t].prevTransformIndex;
+            const std::vector<size_t> *prevGroup = nullptr;
+            for (const auto &group : prevWrites) {
+                if ((group.first == prevT) && (group.second.size() == curGroup.size())) {
+                    prevGroup = &group.second;
+                    break;
+                }
+            }
+
+            if ((prevGroup == nullptr) && (prevWrites.size() == curWrites.size()) && (prevWrites[g].second.size() == curGroup.size())) {
+                prevGroup = &prevWrites[g].second;
+            }
+
+            if (prevGroup == nullptr) {
+                continue;
+            }
+
+            const interop::RSPViewport &viewport = curData.rspViewports[t];
+            const float maxDx = std::abs(float(viewport.scale.x)) * 4.0f;
+            const float maxDy = std::abs(float(viewport.scale.y)) * 4.0f;
+            for (size_t k = 0; k < curGroup.size(); k++) {
+                const size_t m = curGroup[k];
+                const uint32_t curValue = curData.modifyPosUints[m + 1];
+                const uint32_t prevValue = prevData.modifyPosUints[(*prevGroup)[k] + 1];
+                const float curX = float(int16_t((curValue >> 16) & 0xFFFF));
+                const float curY = float(int16_t(curValue & 0xFFFF));
+                const float prevX = float(int16_t((prevValue >> 16) & 0xFFFF));
+                const float prevY = float(int16_t(prevValue & 0xFFFF));
+                if ((std::abs(curX - prevX) > maxDx) || (std::abs(curY - prevY) > maxDy)) {
+                    continue;
+                }
+
+                auto quarters = [](float v) {
+                    int32_t rounded = int32_t(v + ((v >= 0.0f) ? 0.5f : -0.5f));
+                    rounded = (rounded < -32768) ? -32768 : ((rounded > 32767) ? 32767 : rounded);
+                    return uint32_t(uint16_t(int16_t(rounded)));
+                };
+
+                const float x = prevX + (curX - prevX) * p.curFrameWeight;
+                const float y = prevY + (curY - prevY) * p.curFrameWeight;
+                modifyPosUints[m + 1] = (quarters(x) << 16) | quarters(y);
+                pairedAny = true;
+            }
+        }
+
+        return pairedAny;
+    }
+#endif
 };

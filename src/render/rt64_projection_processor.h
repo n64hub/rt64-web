@@ -34,5 +34,9 @@ namespace RT64 {
         // each screen position a game wrote (G_MODIFYVTX's XYSCREEN) drawn between the frame before's and its own, and
         // its x scaled as its vertex's projection was for a picture wider than 4:3.
         std::vector<std::vector<uint32_t>> screenModifyPosUints;
+
+        // RT64_INTERPOLATE_SCREEN_VERTICES: draws a workload's screen position writes between the frame before's and
+        // its own in modifyPosUints, and says whether it drew any.
+        static bool interpolateScreenWrites(const ProcessParams &p, uint32_t w, std::vector<uint32_t> &modifyPosUints);
     };
 };
