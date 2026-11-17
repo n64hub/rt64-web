@@ -82,8 +82,21 @@ namespace RT64 {
                 }
             };
 
-            int32_t left = static_cast<int32_t>(std::floor((computeOrigin(leftOrigin) + (rect.left(true) - computeOrigin(leftOrigin)) * aspectRatioScale) * resScale.x));
-            int32_t right = static_cast<int32_t>(std::ceil((computeOrigin(rightOrigin) + (rect.right(true) - computeOrigin(rightOrigin)) * aspectRatioScale) * resScale.x));
+            // An edge a float's rounding leaves just short of or past a whole pixel is on that pixel: the 4:3 picture's
+            // scaled into a 16:9 window (a ratio of 0.75000006) put a scissor's left edge at x 8 on 367.99994 of 2560,
+            // which floored to 367, a column of a triangle under it drawn left of the rects beside it.
+            auto floorPixel = [](float coord) {
+                const float nearest = std::round(coord);
+                return static_cast<int32_t>((std::fabs(coord - nearest) < 1.0e-3f) ? nearest : std::floor(coord));
+            };
+
+            auto ceilPixel = [](float coord) {
+                const float nearest = std::round(coord);
+                return static_cast<int32_t>((std::fabs(coord - nearest) < 1.0e-3f) ? nearest : std::ceil(coord));
+            };
+
+            int32_t left = floorPixel((computeOrigin(leftOrigin) + (rect.left(true) - computeOrigin(leftOrigin)) * aspectRatioScale) * resScale.x);
+            int32_t right = ceilPixel((computeOrigin(rightOrigin) + (rect.right(true) - computeOrigin(rightOrigin)) * aspectRatioScale) * resScale.x);
             int32_t top = lround(rect.top(true) * resScale.y);
             int32_t bottom = lround(rect.bottom(true) * resScale.y);
             left = correctMisalignment(left, leftOrigin);
