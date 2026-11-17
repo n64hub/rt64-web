@@ -35,9 +35,13 @@
 // them, lost its last now and then, and with it the PAUSE window. With too few for the next one too the game waits for
 // every interpolated frame to be presented: its frames take longer, its rate falls and the interpolated frames grow,
 // down to a rate of one or two a second and a color target for each of hundreds of display frames. Each workload keeps
-// the buffers its biggest draws took, so a game of one workload a frame holds that many frames' vertices.
-#   define WORKLOAD_QUEUE_SIZE 64
-#else
+// the buffers its biggest draws took, so a game of one workload a frame holds that many frames' vertices: a game whose
+// frames need fewer sets WORKLOAD_QUEUE_SIZE itself, PUBLIC on the rt64 target so that everything including this
+// header agrees.
+#   ifndef WORKLOAD_QUEUE_SIZE
+#       define WORKLOAD_QUEUE_SIZE 64
+#   endif
+#elif !defined(WORKLOAD_QUEUE_SIZE)
 #   define WORKLOAD_QUEUE_SIZE 4
 #endif
 
