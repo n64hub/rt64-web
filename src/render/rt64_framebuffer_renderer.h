@@ -164,7 +164,7 @@ namespace RT64 {
             RenderWorker *worker;
             RenderFramebufferStorage *fbStorage;
             const Workload *curWorkload;
-            const std::vector<hlslpp::float2> *rectMoves = nullptr; // RT64_INTERPOLATE_RECT_SCROLLS (GameFrameMap::WorkloadMap).
+            const std::vector<hlslpp::float4> *rectMoves = nullptr; // RT64_INTERPOLATE_RECT_SCROLLS (GameFrameMap::WorkloadMap).
             float curFrameWeight = 1.0f;
             uint32_t fbPairIndex;
             uint32_t fbWidth;

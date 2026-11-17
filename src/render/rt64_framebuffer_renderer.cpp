@@ -1815,12 +1815,17 @@ namespace RT64 {
                             triangles.screenOffset.x = halfPixelOffset.x + ((viewportRect.x + viewportRect.width / 2.0f) - halfViewportSize.x) / halfViewportSize.x;
                             triangles.screenOffset.y = halfPixelOffset.y + (halfViewportSize.y - (viewportRect.y + viewportRect.height / 2.0f)) / halfViewportSize.y;
 #                       if RT64_INTERPOLATE_RECT_SCROLLS
-                            // A rect the game frame before drew elsewhere, unchanged, is drawn between there and here. Here, after
-                            // the lines that place it, which games' own RT64 changes rewrite.
+                            // A rect the game frame before drew elsewhere with the same textures has each edge drawn between
+                            // there and here: its center moves by the mean of its edges' moves, and its size by their
+                            // difference. Here, after the lines that place it, which games' own RT64 changes rewrite.
                             if ((p.rectMoves != nullptr) && (call.callDesc.callIndex < p.rectMoves->size())) {
-                                const hlslpp::float2 move = (*p.rectMoves)[call.callDesc.callIndex] * (1.0f - p.curFrameWeight);
-                                triangles.screenOffset.x += (float(move.x) * invRatioScale * p.resolutionScale.x) / halfViewportSize.x;
-                                triangles.screenOffset.y -= (float(move.y) * p.resolutionScale.y) / halfViewportSize.y;
+                                const hlslpp::float4 edges = (*p.rectMoves)[call.callDesc.callIndex] * (1.0f - p.curFrameWeight);
+                                const float scaleX = invRatioScale * p.resolutionScale.x;
+                                const float scaleY = p.resolutionScale.y;
+                                triangles.screenOffset.x += ((float(edges.x) + float(edges.z)) * 0.5f * scaleX) / halfViewportSize.x;
+                                triangles.screenOffset.y -= ((float(edges.y) + float(edges.w)) * 0.5f * scaleY) / halfViewportSize.y;
+                                triangles.screenScale.x += ((float(edges.z) - float(edges.x)) * scaleX) / framebuffer.viewport.width;
+                                triangles.screenScale.y += ((float(edges.w) - float(edges.y)) * scaleY) / framebuffer.viewport.height;
                             }
 #                       endif
 

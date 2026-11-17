@@ -538,7 +538,13 @@ namespace RT64 {
     // tile processor slides the texture there in the frames between, and a rect that moved is drawn that much nearer
     // where it stood (rectMoves, which the framebuffer renderer reads). A rect whose texture jumped (another glyph of a
     // font, another frame of an animation) shows its new texels unslid, and is still drawn nearer where it stood when it
-    // moved. A rect that changed size or texture is drawn where the game put it.
+    // moved. Last, a rect still unpaired pairs with the nearest that drew the same textures at the same scale with a
+    // size of its own, where each way its edges stayed, moved together less than its side, or one stayed and the other
+    // moved less than a quarter of its side: a panorama's last strip that the game draws on to the bottom of the
+    // screen, its top following the strips above as the camera pitches and its bottom held there. Each of a rect's
+    // edges is drawn between where it was and where it is, its texcoords at its upper left, so it meets the strip above
+    // in every frame between and leaves no row of what is behind it showing. A rect that changed texture, or its size
+    // any other way, is drawn where the game put it.
     static void matchRectScrolls(const Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &workloadMap, bool &tileInterpolationUsed) {
         struct RectCall {
             const DrawCall *call;
@@ -579,10 +585,13 @@ namespace RT64 {
 
         const DrawData &curData = curWorkload.drawData;
         const DrawData &prevData = prevWorkload.drawData;
-        auto sameTextures = [&](const DrawCall &a, const DrawCall &b) {
-            if (((a.rect.lrx - a.rect.ulx) != (b.rect.lrx - b.rect.ulx)) || ((a.rect.lry - a.rect.uly) != (b.rect.lry - b.rect.uly)) ||
-                (a.rectDsdx != b.rectDsdx) || (a.rectDtdy != b.rectDtdy) || (a.tileCount != b.tileCount))
-            {
+        auto sameSize = [](const DrawCall &a, const DrawCall &b) {
+            return ((a.rect.lrx - a.rect.ulx) == (b.rect.lrx - b.rect.ulx)) && ((a.rect.lry - a.rect.uly) == (b.rect.lry - b.rect.uly));
+        };
+
+        // The same textures at the same scale, whatever the rect's size.
+        auto sameLook = [&](const DrawCall &a, const DrawCall &b) {
+            if ((a.rectDsdx != b.rectDsdx) || (a.rectDtdy != b.rectDtdy) || (a.tileCount != b.tileCount)) {
                 return false;
             }
 
@@ -601,6 +610,10 @@ namespace RT64 {
             return true;
         };
 
+        auto sameTextures = [&](const DrawCall &a, const DrawCall &b) {
+            return sameSize(a, b) && sameLook(a, b);
+        };
+
         auto sameRect = [&](const DrawCall &a, const DrawCall &b) {
             return (a.rect.ulx == b.rect.ulx) && (a.rect.uly == b.rect.uly) && sameTextures(a, b);
         };
@@ -609,6 +622,21 @@ namespace RT64 {
         auto movedLess = [](const DrawCall &a, const DrawCall &b) {
             const int32_t side = std::max(a.rect.lrx - a.rect.ulx, a.rect.lry - a.rect.uly);
             return (abs(b.rect.ulx - a.rect.ulx) < side) && (abs(b.rect.uly - a.rect.uly) < side);
+        };
+
+        // Each way, in quarter pixels, its edges stayed, moved together less than its side, or one stayed and the other
+        // moved less than a quarter of its side.
+        auto edgesFollow = [](const DrawCall &a, const DrawCall &b) {
+            auto follows = [](int32_t aUl, int32_t aLr, int32_t bUl, int32_t bLr) {
+                const int32_t side = std::min(aLr - aUl, bLr - bUl);
+                if ((bUl - aUl) == (bLr - aLr)) {
+                    return abs(bUl - aUl) < side;
+                }
+
+                return ((aUl == bUl) && ((abs(bLr - aLr) * 4) < side)) || ((aLr == bLr) && ((abs(bUl - aUl) * 4) < side));
+            };
+
+            return follows(a.rect.ulx, a.rect.lrx, b.rect.ulx, b.rect.lrx) && follows(a.rect.uly, a.rect.lry, b.rect.uly, b.rect.lry);
         };
 
         // A step in a tile's texels, taken inside its period when it wraps or mirrors.
@@ -671,6 +699,32 @@ namespace RT64 {
         }
 
         for (size_t r = 0; r < curRects.size(); r++) {
+            if (curFound[r] < prevRects.size()) {
+                continue;
+            }
+
+            const DrawCall &curCall = *curRects[r].call;
+            int32_t nearest = INT32_MAX;
+            for (size_t j = 0; j < prevRects.size(); j++) {
+                const DrawCall &prevCall = *prevRects[j].call;
+                if (prevUsed[j] || sameSize(curCall, prevCall) || !edgesFollow(curCall, prevCall) || !sameLook(curCall, prevCall)) {
+                    continue;
+                }
+
+                const int32_t distance = abs(prevCall.rect.ulx - curCall.rect.ulx) + abs(prevCall.rect.uly - curCall.rect.uly) +
+                    abs(prevCall.rect.lrx - curCall.rect.lrx) + abs(prevCall.rect.lry - curCall.rect.lry);
+                if (distance < nearest) {
+                    nearest = distance;
+                    curFound[r] = j;
+                }
+            }
+
+            if (curFound[r] < prevRects.size()) {
+                prevUsed[curFound[r]] = true;
+            }
+        }
+
+        for (size_t r = 0; r < curRects.size(); r++) {
             const size_t found = curFound[r];
             if (found == prevRects.size()) {
                 continue;
@@ -683,8 +737,10 @@ namespace RT64 {
             const float *prevTc = &prevData.triTcFloats[prevRects[found].rawVertex * 2];
             const float ds = curTc[0] - prevTc[0];
             const float dt = curTc[1] - prevTc[1];
+
+            // A rect that changed size keeps its texels a pixel, so its texcoords moved by its upper left's.
             bool together = true;
-            for (uint32_t v = 1; (v < 6) && together; v++) {
+            for (uint32_t v = 1; (v < 6) && together && sameSize(curCall, prevCall); v++) {
                 together = (fabsf((curTc[v * 2 + 0] - prevTc[v * 2 + 0]) - ds) < 1.0e-3f) && (fabsf((curTc[v * 2 + 1] - prevTc[v * 2 + 1]) - dt) < 1.0e-3f);
             }
 
@@ -708,7 +764,8 @@ namespace RT64 {
                 scrolled = scrolled || (stepS[t] != 0.0f) || (stepT[t] != 0.0f);
             }
 
-            const bool moved = (prevCall.rect.ulx != curCall.rect.ulx) || (prevCall.rect.uly != curCall.rect.uly);
+            const bool moved = (prevCall.rect.ulx != curCall.rect.ulx) || (prevCall.rect.uly != curCall.rect.uly) ||
+                (prevCall.rect.lrx != curCall.rect.lrx) || (prevCall.rect.lry != curCall.rect.lry);
             if (!moved && (!slides || !scrolled)) {
                 continue;
             }
@@ -717,10 +774,11 @@ namespace RT64 {
             // across a strip of its frames jumps a frame at a time, and moves on every game frame.
             if (moved) {
                 if (workloadMap.rectMoves.size() <= curCall.callIndex) {
-                    workloadMap.rectMoves.resize(curCall.callIndex + 1, hlslpp::float2(0.0f, 0.0f));
+                    workloadMap.rectMoves.resize(curCall.callIndex + 1, hlslpp::float4(0.0f, 0.0f, 0.0f, 0.0f));
                 }
 
-                workloadMap.rectMoves[curCall.callIndex] = hlslpp::float2(float(prevCall.rect.ulx - curCall.rect.ulx), float(prevCall.rect.uly - curCall.rect.uly)) / 4.0f;
+                workloadMap.rectMoves[curCall.callIndex] = hlslpp::float4(float(prevCall.rect.ulx - curCall.rect.ulx), float(prevCall.rect.uly - curCall.rect.uly),
+                    float(prevCall.rect.lrx - curCall.rect.lrx), float(prevCall.rect.lry - curCall.rect.lry)) / 4.0f;
             }
 
             if (!slides || !scrolled) {

@@ -90,9 +90,10 @@ namespace RT64 {
         };
 
         struct WorkloadMap {
-            // RT64_INTERPOLATE_RECT_SCROLLS: by a rect's call index, how far from where this frame draws it the frame
-            // before drew it, in pixels, for one that moved and changed nothing else; empty past the last that moved.
-            std::vector<hlslpp::float2> rectMoves;
+            // RT64_INTERPOLATE_RECT_SCROLLS: by a rect's call index, how far from where this frame draws its edges the
+            // frame before drew them, in pixels, its upper left's in xy and its lower right's in zw, for one that moved
+            // and kept its textures; empty past the last that moved.
+            std::vector<hlslpp::float4> rectMoves;
             std::vector<ViewProjectionMap> viewProjections;
             std::vector<TransformMap> transforms;
             std::vector<TileMap> tiles;
