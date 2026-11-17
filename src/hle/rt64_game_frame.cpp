@@ -527,13 +527,17 @@ namespace RT64 {
 #if RT64_INTERPOLATE_RECT_SCROLLS
     // A rectangle (a texrect, drawn without a viewport) is never paired with one of the game frame before, so a
     // texture the game scrolls inside a rect that stays put (a horizon panorama that turns with the camera, a sky or a
-    // menu's backdrop) steps once a game frame, while the world interpolated around it moves on every frame. Each rect
-    // here is paired with the next of the frame before's in its order that drew the same place with the same textures
-    // (its rect, scale and tiles, and each tile's TMEM hash), and when every corner's texcoords moved by the same
-    // amount, not nothing and less than a quarter of the texels the rect spans in each direction (a step across a
-    // wrapped tile's period taken inside it), its tiles are placed that much back in the frame before, so the tile
-    // processor slides the texture there in the frames between. A rect that moved, changed size or texture, or whose
-    // texture jumped (another glyph of a font, another frame of an animation) is drawn where the game put it.
+    // menu's backdrop) steps once a game frame, and so does a rect the game moves (the same panorama as the camera
+    // pitches), while the world interpolated around it moves on every frame. Each rect here is paired with the next of
+    // the frame before's in its order that drew the same place with the same textures (its rect, scale and tiles, and
+    // each tile's TMEM hash), or, with none, with the nearest that drew the same textures at the same size and scale
+    // less than its longer side away each way: a strip as wide as the screen and a few rows high follows a camera that
+    // pitches fast, and a glyph of a font doesn't pair with the same glyph a cell or more away. When every corner's
+    // texcoords moved by the same amount, less than a quarter of the texels the rect spans in each direction (a step
+    // across a wrapped tile's period taken inside it), its tiles are placed that much back in the frame before, so the
+    // tile processor slides the texture there in the frames between, and a rect that moved is drawn that much nearer
+    // where it stood (rectMoves, which the framebuffer renderer reads). A rect that changed size or texture, or whose
+    // texture jumped (another glyph of a font, another frame of an animation), is drawn where the game put it.
     static void matchRectScrolls(const Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &workloadMap, bool &tileInterpolationUsed) {
         struct RectCall {
             const DrawCall *call;
@@ -574,8 +578,8 @@ namespace RT64 {
 
         const DrawData &curData = curWorkload.drawData;
         const DrawData &prevData = prevWorkload.drawData;
-        auto sameRect = [&](const DrawCall &a, const DrawCall &b) {
-            if ((a.rect.ulx != b.rect.ulx) || (a.rect.uly != b.rect.uly) || (a.rect.lrx != b.rect.lrx) || (a.rect.lry != b.rect.lry) ||
+        auto sameTextures = [&](const DrawCall &a, const DrawCall &b) {
+            if (((a.rect.lrx - a.rect.ulx) != (b.rect.lrx - b.rect.ulx)) || ((a.rect.lry - a.rect.uly) != (b.rect.lry - b.rect.uly)) ||
                 (a.rectDsdx != b.rectDsdx) || (a.rectDtdy != b.rectDtdy) || (a.tileCount != b.tileCount))
             {
                 return false;
@@ -596,6 +600,16 @@ namespace RT64 {
             return true;
         };
 
+        auto sameRect = [&](const DrawCall &a, const DrawCall &b) {
+            return (a.rect.ulx == b.rect.ulx) && (a.rect.uly == b.rect.uly) && sameTextures(a, b);
+        };
+
+        // Moved by less than the rect's longer side each way, in quarter pixels.
+        auto movedLess = [](const DrawCall &a, const DrawCall &b) {
+            const int32_t side = std::max(a.rect.lrx - a.rect.ulx, a.rect.lry - a.rect.uly);
+            return (abs(b.rect.ulx - a.rect.ulx) < side) && (abs(b.rect.uly - a.rect.uly) < side);
+        };
+
         // A step in a tile's texels, taken inside its period when it wraps or mirrors.
         auto insidePeriod = [](float step, int mask, int cm) {
             const float period = float(mask) * ((cm & G_TX_MIRROR) ? 2.0f : 1.0f);
@@ -614,25 +628,56 @@ namespace RT64 {
             return step;
         };
 
+        // Every rect that drew the same place pairs first, so one that stayed put never pairs with a look-alike that moved.
+        thread_local std::vector<size_t> curFound;
+        curFound.assign(curRects.size(), prevRects.size());
         size_t searchStart = 0;
-        for (const RectCall &curRect : curRects) {
-            const DrawCall &curCall = *curRect.call;
-            size_t found = prevRects.size();
+        for (size_t r = 0; r < curRects.size(); r++) {
             for (size_t i = 0; i < prevRects.size(); i++) {
                 const size_t j = (searchStart + i) % prevRects.size();
-                if (!prevUsed[j] && sameRect(curCall, *prevRects[j].call)) {
-                    found = j;
+                if (!prevUsed[j] && sameRect(*curRects[r].call, *prevRects[j].call)) {
+                    curFound[r] = j;
+                    prevUsed[j] = true;
+                    searchStart = j + 1;
                     break;
                 }
             }
+        }
 
+        for (size_t r = 0; r < curRects.size(); r++) {
+            if (curFound[r] < prevRects.size()) {
+                continue;
+            }
+
+            const DrawCall &curCall = *curRects[r].call;
+            int32_t nearest = INT32_MAX;
+            for (size_t j = 0; j < prevRects.size(); j++) {
+                const DrawCall &prevCall = *prevRects[j].call;
+                if (prevUsed[j] || !movedLess(curCall, prevCall) || !sameTextures(curCall, prevCall)) {
+                    continue;
+                }
+
+                const int32_t distance = abs(prevCall.rect.ulx - curCall.rect.ulx) + abs(prevCall.rect.uly - curCall.rect.uly);
+                if (distance < nearest) {
+                    nearest = distance;
+                    curFound[r] = j;
+                }
+            }
+
+            if (curFound[r] < prevRects.size()) {
+                prevUsed[curFound[r]] = true;
+            }
+        }
+
+        for (size_t r = 0; r < curRects.size(); r++) {
+            const size_t found = curFound[r];
             if (found == prevRects.size()) {
                 continue;
             }
 
-            prevUsed[found] = true;
-            searchStart = found + 1;
-
+            const RectCall &curRect = curRects[r];
+            const DrawCall &curCall = *curRect.call;
+            const DrawCall &prevCall = *prevRects[found].call;
             const float *curTc = &curData.triTcFloats[curRect.rawVertex * 2];
             const float *prevTc = &prevData.triTcFloats[prevRects[found].rawVertex * 2];
             const float ds = curTc[0] - prevTc[0];
@@ -662,7 +707,20 @@ namespace RT64 {
                 scrolled = scrolled || (stepS[t] != 0.0f) || (stepT[t] != 0.0f);
             }
 
-            if (!slides || !scrolled) {
+            const bool moved = (prevCall.rect.ulx != curCall.rect.ulx) || (prevCall.rect.uly != curCall.rect.uly);
+            if (!slides || (!scrolled && !moved)) {
+                continue;
+            }
+
+            if (moved) {
+                if (workloadMap.rectMoves.size() <= curCall.callIndex) {
+                    workloadMap.rectMoves.resize(curCall.callIndex + 1, hlslpp::float2(0.0f, 0.0f));
+                }
+
+                workloadMap.rectMoves[curCall.callIndex] = hlslpp::float2(float(prevCall.rect.ulx - curCall.rect.ulx), float(prevCall.rect.uly - curCall.rect.uly)) / 4.0f;
+            }
+
+            if (!scrolled) {
                 continue;
             }
 

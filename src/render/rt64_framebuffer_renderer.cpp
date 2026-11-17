@@ -1798,6 +1798,14 @@ namespace RT64 {
                             }
 
                             RenderViewport viewportRect = convertViewportRect(call.callDesc.rect, p.resolutionScale, p.fbWidth, invRatioScale, extOriginPercentage, horizontalMisalignment, call.callDesc.rectLeftOrigin, call.callDesc.rectRightOrigin);
+#                       if RT64_INTERPOLATE_RECT_SCROLLS
+                            // A rect the game frame before drew elsewhere, unchanged, is drawn between there and here.
+                            if ((p.rectMoves != nullptr) && (call.callDesc.callIndex < p.rectMoves->size())) {
+                                const hlslpp::float2 move = (*p.rectMoves)[call.callDesc.callIndex] * (1.0f - p.curFrameWeight);
+                                viewportRect.x += float(move.x) * invRatioScale * p.resolutionScale.x;
+                                viewportRect.y += float(move.y) * p.resolutionScale.y;
+                            }
+#                       endif
                             triangles.screenScale = { viewportRect.width / framebuffer.viewport.width, viewportRect.height / framebuffer.viewport.height };
                             triangles.screenOffset.x = halfPixelOffset.x + ((viewportRect.x + viewportRect.width / 2.0f) - halfViewportSize.x) / halfViewportSize.x;
                             triangles.screenOffset.y = halfPixelOffset.y + (halfViewportSize.y - (viewportRect.y + viewportRect.height / 2.0f)) / halfViewportSize.y;
