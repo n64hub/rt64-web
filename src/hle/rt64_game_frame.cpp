@@ -293,6 +293,11 @@ namespace RT64 {
     // between drew its trees stretched to several times their height for a frame. Its cameras that move (its flyovers,
     // the ball's flight) moved at most about 7 near plane distances and turned at most about 24 degrees a game frame, and
     // its fastest moved as fast for many frames running, which the second check's ratio to the frame before leaves out.
+    //
+    // The turn is the whole turn from one camera to the other, the angle of the rotation between their axes, and not only
+    // how far the way the camera looks moved: San Francisco Rush 2049's attract race cuts between cameras that look
+    // straight down at the cars by rolling about the way they look, turning the picture 86-180 degrees, which left the
+    // way they look where it was.
     static bool isCameraCut(const hlslpp::float4x4 &curView, const hlslpp::float4x4 &curProj, const hlslpp::float4x4 &prevView, float prevEyeStep, float &eyeStep) {
         eyeStep = 0.0f;
 
@@ -317,7 +322,13 @@ namespace RT64 {
         const hlslpp::float3 curEye = -hlslpp::mul(hlslpp::float3(curView[3].xyz), curInverse);
         const hlslpp::float3 prevEye = -hlslpp::mul(hlslpp::float3(prevView[3].xyz), prevInverse);
         const float step = float(hlslpp::length(curEye - prevEye)) / nearDistance;
-        const float turnCosine = hlslpp::dot(hlslpp::normalize(curInverse[2]), hlslpp::normalize(prevInverse[2]));
+        // The cosine of the rotation's angle, from its trace: the sum of each axis's cosine to its old place is 1 + 2 cos.
+        float axisCosines = 0.0f;
+        for (int a = 0; a < 3; a++) {
+            axisCosines += float(hlslpp::dot(hlslpp::normalize(curInverse[a]), hlslpp::normalize(prevInverse[a])));
+        }
+
+        const float turnCosine = (axisCosines - 1.0f) / 2.0f;
         if (!std::isfinite(step) || !std::isfinite(turnCosine)) {
             return false;
         }
