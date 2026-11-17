@@ -55,9 +55,10 @@ namespace RT64 {
 
         struct TransformMap {
             RigidBody rigidBody;
+            // Its vertices as its pair's of the frame before (RT64_SKIP_PLACE_SWAPS).
+            bool verticesStill = false;
             uint32_t prevTransformIndex = 0;
             bool mapped = false;
-            bool verticesStill = false;
         };
 
         struct TileMap {
