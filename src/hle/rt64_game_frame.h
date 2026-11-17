@@ -57,6 +57,7 @@ namespace RT64 {
             RigidBody rigidBody;
             uint32_t prevTransformIndex = 0;
             bool mapped = false;
+            bool verticesStill = false;
         };
 
         struct TileMap {

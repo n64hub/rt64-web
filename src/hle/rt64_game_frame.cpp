@@ -387,6 +387,18 @@ namespace RT64 {
         std::sort(places.begin(), places.end());
         places.erase(std::unique(places.begin(), places.end()), places.end());
     }
+
+    // A hash of each transform's vertices, as many and where they are: one mesh from another.
+    static void collectTransformMeshes(const Workload &workload, std::vector<uint64_t> &meshes) {
+        const DrawData &drawData = workload.drawData;
+        const uint32_t transformCount = uint32_t(drawData.worldTransformVertexIndices.size());
+        meshes.resize(transformCount);
+        for (uint32_t i = 0; i < transformCount; i++) {
+            const uint32_t vertexIndex = drawData.worldTransformVertexIndices[i];
+            const uint32_t vertexCount = drawData.worldTransformVertexCount(i);
+            meshes[i] = (vertexCount > 0) ? XXH3_64bits_withSeed(&drawData.posFloats[vertexIndex * 3], vertexCount * 3 * sizeof(float), vertexCount) : 0;
+        }
+    }
 #endif
 
     TransformMatchResult computeTransformMatch(const hlslpp::float4x4 &curTransform, const hlslpp::float4x4 &curViewProj, const hlslpp::float4x4 &prevTransform, const hlslpp::float4x4 &prevViewProj, const RigidBody *prevRigidBody) {
@@ -1362,12 +1374,33 @@ namespace RT64 {
         // out on the fairway every other frame, and its trees jumped about as a shot was aimed, a fifth of a frame's
         // trees paired so. Left unpaired, each is drawn at its own place between the frames, as it stood. What moves
         // into the very place another left in the same frame is left unpaired too, and steps for a frame.
+        //
+        // Nor a transform whose vertices are other than those of the frame before's, unless that one's were changing
+        // then (paired with other vertices in the frame before that): a mesh that held still or had just come, and has
+        // other vertices now, is another mesh the game drew with the same call, not the same one moving. Turok's
+        // levels are made of blocks, each a mesh of its own that never changes, and as one came into view, or took
+        // another level of detail and so another call, it was paired with one that left, and drawn partway from its
+        // place in the frames between: a slab of cliff over the sky, a hole at the picture's edge where the background
+        // showed instead of a wall. Turok puts its camera in the world matrices in places, so each moves as the camera
+        // turns, and only the meshes tell one block from another. A mesh that held still or had just come and then changes,
+        // and what it is drawn with, steps for a frame.
         if (!matchCandidates.empty()) {
             thread_local std::vector<TransformPlace> curPlaces;
             thread_local std::vector<TransformPlace> prevPlaces;
+            thread_local std::vector<uint64_t> curMeshes;
+            thread_local std::vector<uint64_t> prevMeshes;
             collectTransformPlaces(firstCurWorkload, curPlaces);
             collectTransformPlaces(firstPrevWorkload, prevPlaces);
+            collectTransformMeshes(firstCurWorkload, curMeshes);
+            collectTransformMeshes(firstPrevWorkload, prevMeshes);
             auto tradesPlaces = [&](const MatchCandidate &candidate) {
+                if ((firstPrevWorkloadMap != nullptr) && (candidate.curIndex < curMeshes.size()) && (candidate.prevIndex < prevMeshes.size())) {
+                    const GameFrameMap::TransformMap &prevMap = firstPrevWorkloadMap->transforms[candidate.prevIndex];
+                    if ((!prevMap.mapped || prevMap.verticesStill) && (curMeshes[candidate.curIndex] != prevMeshes[candidate.prevIndex])) {
+                        return true;
+                    }
+                }
+
                 const TransformPlace curPlace = transformPlace(firstCurWorkload.drawData.worldTransforms[candidate.curIndex]);
                 const TransformPlace prevPlace = transformPlace(firstPrevWorkload.drawData.worldTransforms[candidate.prevIndex]);
                 return !(curPlace == prevPlace) && std::binary_search(prevPlaces.begin(), prevPlaces.end(), curPlace) && std::binary_search(curPlaces.begin(), curPlaces.end(), prevPlace);
@@ -1654,6 +1687,18 @@ namespace RT64 {
         curTransformMap.prevTransformIndex = prevTransformIndex;
         curTransformMap.mapped = true;
         curWorkloadMap.prevTransformsMapped[prevTransformIndex] = true;
+
+#if RT64_SKIP_PLACE_SWAPS
+        // Whether its vertices held still, for the pairs of the next frame (above).
+        {
+            const uint32_t vertexIndex = curWorkload.drawData.worldTransformVertexIndices[curTransformIndex];
+            const uint32_t vertexCount = curWorkload.drawData.worldTransformVertexCount(curTransformIndex);
+            const uint32_t prevIndex = prevWorkload.drawData.worldTransformVertexIndices[prevTransformIndex];
+            const uint32_t prevCount = prevWorkload.drawData.worldTransformVertexCount(prevTransformIndex);
+            curTransformMap.verticesStill = (vertexCount == prevCount) && ((vertexCount == 0) ||
+                (memcmp(&curWorkload.drawData.posFloats[vertexIndex * 3], &prevWorkload.drawData.posFloats[prevIndex * 3], vertexCount * 3 * sizeof(float)) == 0));
+        }
+#endif
 
         uint64_t curVertexHash = 0;
         uint64_t prevVertexHash = 0;
