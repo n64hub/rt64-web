@@ -388,7 +388,6 @@ namespace RT64 {
         }
 
         swapChain = presentGraphicsWorker->commandQueue->createSwapChain(swapChainDesc);
-        FrameDump::swapChainCreated(swapChain.get());
 
         // Before configuring multisampling, make sure the device actually supports it for the formats we'll use. If it doesn't, turn off antialiasing in the configuration.
         const RenderSampleCounts colorSampleCounts = device->getSampleCountsSupported(RenderTarget::colorBufferFormat(usesHDR));
@@ -461,6 +460,7 @@ namespace RT64 {
 #   else
         sharedQueueResources->setSwapChainRate(appWindow->getRefreshRate());
 #   endif
+        FrameDump::swapChainCreated(swapChain.get());
         sharedQueueResources->renderTargetManager.setMultisampling(multisampling);
         sharedQueueResources->renderTargetManager.setUsesHDR(usesHDR);
 
