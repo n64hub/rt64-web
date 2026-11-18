@@ -562,9 +562,11 @@ namespace RT64 {
     // where it stood (rectMoves, which the framebuffer renderer reads). A rect whose texture jumped (another glyph of a
     // font, another frame of an animation) shows its new texels unslid, and is still drawn nearer where it stood when it
     // moved. Last, a rect still unpaired pairs with the nearest that drew the same textures at the same scale with a
-    // size of its own, where each way its edges stayed, moved together less than its side, or one stayed and the other
-    // moved less than a quarter of its side: a panorama's last strip that the game draws on to the bottom of the
-    // screen, its top following the strips above as the camera pitches and its bottom held there. Each of a rect's
+    // size of its own, where each way its edges stayed, moved together less than its side, one stayed and the other
+    // moved less than a quarter of its side, or both moved the same way less than its side and a pixel apart at most:
+    // a panorama's last strip that the game draws on to the bottom of the screen, its top following the strips above
+    // as the camera pitches and its bottom held there, or a strip of a sprite that moves by fractions of a pixel with
+    // its edges put on whole pixels, a pixel taller in some frames than in others. Each of a rect's
     // edges is drawn between where it was and where it is, its texcoords at its upper left, so it meets the strip above
     // in every frame between and leaves no row of what is behind it showing. A rect that changed texture, or its size
     // any other way, is drawn where the game put it. Places and sizes are compared as the game drew them, before the
@@ -650,16 +652,27 @@ namespace RT64 {
             return (abs(b.gameRect.ulx - a.gameRect.ulx) < side) && (abs(b.gameRect.uly - a.gameRect.uly) < side);
         };
 
-        // Each way, in quarter pixels, its edges stayed, moved together less than its side, or one stayed and the other
-        // moved less than a quarter of its side.
+        // Each way, in quarter pixels, its edges stayed, moved together less than its side, one stayed and the other
+        // moved less than a quarter of its side, or both moved the same way less than its side and a pixel apart at
+        // most: a strip of a sprite drawn in strips, each edge put on a whole pixel as the sprite moves by fractions of
+        // one (a 2D screen the game or its recomp scales), grows or shrinks by a pixel in the frames an edge rounds the
+        // other way, and left unpaired it is drawn where the game put it while the strips beside it are drawn between,
+        // a row of what is behind them showing.
         auto edgesFollow = [](const DrawCall &a, const DrawCall &b) {
             auto follows = [](int32_t aUl, int32_t aLr, int32_t bUl, int32_t bLr) {
                 const int32_t side = std::min(aLr - aUl, bLr - bUl);
-                if ((bUl - aUl) == (bLr - aLr)) {
-                    return abs(bUl - aUl) < side;
+                const int32_t ulMove = bUl - aUl;
+                const int32_t lrMove = bLr - aLr;
+                if (ulMove == lrMove) {
+                    return abs(ulMove) < side;
                 }
 
-                return ((aUl == bUl) && ((abs(bLr - aLr) * 4) < side)) || ((aLr == bLr) && ((abs(bUl - aUl) * 4) < side));
+                if (((ulMove == 0) && ((abs(lrMove) * 4) < side)) || ((lrMove == 0) && ((abs(ulMove) * 4) < side))) {
+                    return true;
+                }
+
+                const bool sameWay = (ulMove != 0) && (lrMove != 0) && ((ulMove > 0) == (lrMove > 0));
+                return sameWay && (abs(ulMove) < side) && (abs(lrMove) < side) && (abs(lrMove - ulMove) <= 4);
             };
 
             return follows(a.gameRect.ulx, a.gameRect.lrx, b.gameRect.ulx, b.gameRect.lrx) && follows(a.gameRect.uly, a.gameRect.lry, b.gameRect.uly, b.gameRect.lry);
