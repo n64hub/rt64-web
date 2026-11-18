@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <memory.h>
 #include <stdio.h>
 
@@ -154,6 +155,29 @@ namespace RT64 {
         } else {
             return hlslpp::uint2(0, 0);
         }
+    }
+
+    // The shape of one of the framebuffer's pixels on the TV: its width over its height, where 1 is square. A TV shows
+    // its picture at 4:3 over 640 columns and 480 visible half-lines (576 on PAL's 625-line field pair), and the VI
+    // spreads each pixel over 1 / xScale columns and each row over 2 / yScale half-lines (one line read in two for a
+    // framebuffer whose stride the VI's width doubles). A 320x240 or 640x480 framebuffer is square, PAL's 240 rows
+    // stretched over 288 lines too; a 512x240 one is 0.625, so the TV shows it at 4:3, not 512:240. Within 3% of
+    // square, or degenerate, it is 1.
+    float VI::pixelAspect() const {
+        const hlslpp::uint2 size = fbSize();
+        if ((size.x == 0) || (size.y == 0) || (width == 0) || (xTransform.xScale == 0) || (yTransform.yScale == 0)) {
+            return 1.0f;
+        }
+
+        const float visibleHalfLines = (vSync > 600) ? 576.0f : 480.0f;
+        const float columnsPerPixel = xScaleFloat();
+        const float halfLinesPerRow = 2.0f * yScaleFloat() * (float(size.x) / float(width));
+        const float aspect = ((4.0f / 3.0f) * columnsPerPixel / 640.0f) / (halfLinesPerRow / visibleHalfLines);
+        if ((aspect < 0.25f) || (aspect > 4.0f) || (std::abs(aspect - 1.0f) < 0.03f)) {
+            return 1.0f;
+        }
+
+        return aspect;
     }
 
     float VI::xScaleFloat() const {

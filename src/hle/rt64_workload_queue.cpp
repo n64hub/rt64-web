@@ -358,7 +358,7 @@ namespace RT64 {
         framebufferRenderer->updateMultisampling();
     }
 
-    void WorkloadQueue::threadConfigurationUpdate(hlslpp::uint2 viFbSize, WorkloadConfiguration &workloadConfig) {
+    void WorkloadQueue::threadConfigurationUpdate(hlslpp::uint2 viFbSize, float viPixelAspect, WorkloadConfiguration &workloadConfig) {
         const std::scoped_lock lock(ext.sharedResources->configurationMutex);
         const bool sizeChanged = ext.sharedResources->swapChainSizeChanged;
         ext.sharedResources->swapChainSizeChanged = false;
@@ -368,14 +368,17 @@ namespace RT64 {
         const uint32_t MinimumReferenceHeight = 60;
         const uint32_t referenceHeight = (viFbSize[1] > 0) ? std::max(viFbSize[1], MinimumReferenceHeight) : 240;
 
-        // Compute the aspect ratio to be used for the frame.
+        // Compute the aspect ratio to be used for the frame. The ratios are the framebuffer's, in its own pixels: a
+        // ratio the TV shows (the window's, a manual target) is divided by the shape of those pixels, so a 512x240
+        // framebuffer (0.625) is 4:3 in a 4:3 window and widened under Expand by as much as a 320x240 one is.
         workloadConfig.aspectRatioSource = (viFbSize[1] > 0) ? float(viFbSize[0]) / float(viFbSize[1]) : (4.0f / 3.0f);
+        const float pixelAspect = (viFbSize[1] > 0) ? viPixelAspect : 1.0f;
 
         const auto ratioMode = ext.sharedResources->userConfig.aspectRatio;
         switch (ratioMode) {
         case UserConfiguration::AspectRatio::Expand:
             if ((ext.sharedResources->swapChainWidth > 0) && (ext.sharedResources->swapChainHeight > 0)) {
-                const float derivedRatioTarget = float(ext.sharedResources->swapChainWidth) / float(ext.sharedResources->swapChainHeight);
+                const float derivedRatioTarget = float(ext.sharedResources->swapChainWidth) / float(ext.sharedResources->swapChainHeight) / pixelAspect;
                 workloadConfig.aspectRatioTarget = std::max(derivedRatioTarget, workloadConfig.aspectRatioSource);
             }
             else {
@@ -384,7 +387,7 @@ namespace RT64 {
 
             break;
         case UserConfiguration::AspectRatio::Manual:
-            workloadConfig.aspectRatioTarget = float(ext.sharedResources->userConfig.aspectTarget);
+            workloadConfig.aspectRatioTarget = float(ext.sharedResources->userConfig.aspectTarget) / pixelAspect;
             break;
         case UserConfiguration::AspectRatio::Original:
         default:
@@ -400,7 +403,7 @@ namespace RT64 {
             break;
         case UserConfiguration::AspectRatio::Manual:
             if ((ext.sharedResources->swapChainWidth > 0) && (ext.sharedResources->swapChainHeight > 0)) {
-                const float reducedExtTarget = float(ext.sharedResources->userConfig.extAspectTarget) - workloadConfig.aspectRatioSource;
+                const float reducedExtTarget = float(ext.sharedResources->userConfig.extAspectTarget) / pixelAspect - workloadConfig.aspectRatioSource;
                 const float reducedDisplayTarget = workloadConfig.aspectRatioTarget - workloadConfig.aspectRatioSource;
                 if ((reducedExtTarget > 0.0f) && (reducedDisplayTarget > 0.0f)) {
                     workloadConfig.extAspectPercentage = std::clamp((reducedExtTarget / reducedDisplayTarget), 0.0f, 1.0f);
@@ -1291,7 +1294,7 @@ namespace RT64 {
 
                 ElapsedTimer workloadTimer;
                 workloadProfiler.start();
-                threadConfigurationUpdate(lastWorkload.viFbSize, workloadConfig);
+                threadConfigurationUpdate(lastWorkload.viFbSize, lastWorkload.viPixelAspect, workloadConfig);
 
                 // FIXME: This is a very hacky way to find out if we need to advance the frame if the workload was paused for the first time.
                 if (!workload.paused || (!gameFrames[curFrameIndex].workloads.empty() && (gameFrames[curFrameIndex].workloads[0] != (uint32_t)processCursor))) {

@@ -112,7 +112,9 @@ namespace RT64 {
         // on the screen. To work around that, the viewport the buffer will be drawn in will be expanded so only
         // the region of interest is rendered. A scissor will cut it off correctly according to the coordinates
         // specified by the VI.
-        const hlslpp::float2 sdSize = removeBlackBorders ? hlslpp::float2(vi.fbSize()) : hlslpp::float2(320.0f, 240.0f);
+        // Without the borders, SD space is the framebuffer as the TV shows it: its width times the shape of its pixels
+        // (VI::pixelAspect()), so a 512x240 one is presented at 4:3.
+        const hlslpp::float2 sdSize = removeBlackBorders ? hlslpp::float2(float(vi.fbSize().x) * vi.pixelAspect(), float(vi.fbSize().y)) : hlslpp::float2(320.0f, 240.0f);
         const hlslpp::float2 hdSize = computeHDSize(sdSize, resolutionScale, downsamplingScale);
         const hlslpp::float2 windowSize = { float(swapChain->getWidth()), float(swapChain->getHeight()) };
 

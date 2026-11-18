@@ -226,6 +226,7 @@ namespace RT64 {
         FramebufferStorage fbStorage;
         uint32_t viOriginalRate;
         hlslpp::uint2 viFbSize = {};
+        float viPixelAspect = 1.0f; // VI::pixelAspect() of the VI viFbSize is from.
         // Draws, and only to framebuffers the VI hasn't shown (State::advanceWorkload): an offscreen pass. Or draws to
         // one it has, shownFbAddress, the last such. With RT64_GAME_FRAME_WORKLOADS either can start a game frame of
         // several workloads (WorkloadQueue::endedGameFrame).
