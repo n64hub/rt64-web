@@ -1326,6 +1326,7 @@ namespace RT64 {
 
         // We only change these once the draw state has been checked.
         DrawCall &drawCall = state->drawCall;
+        drawCall.gameRect = unfixedRect;
         drawCall.minWorldMatrix = 0;
         drawCall.maxWorldMatrix = 0;
         drawCall.rect = drawRect;
@@ -1338,8 +1339,6 @@ namespace RT64 {
         if (flushedState) {
             state->loadDrawState();
         }
-
-        drawCall.gameRect = unfixedRect;
 
         auto &triPosFloats = workload.drawData.triPosFloats;
         auto &triTcFloats = workload.drawData.triTcFloats;
