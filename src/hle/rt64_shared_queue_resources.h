@@ -12,6 +12,7 @@
 #include "render/rt64_render_target_manager.h"
 
 #include "rt64_framebuffer_manager.h"
+#include "rt64_frame_dump.h"
 
 #if RT_ENABLED
 #   include "render/rt64_raytracing_resources.h"
@@ -140,7 +141,7 @@ namespace RT64 {
 
         void setSwapChainRate(uint32_t rate) {
             std::scoped_lock<std::mutex> configurationLock(configurationMutex);
-            swapChainRate = rate;
+            swapChainRate = FrameDump::swapChainRate(rate);
         }
 
         void setUserConfig(const UserConfiguration &newUserConfig, bool discardFBs) {

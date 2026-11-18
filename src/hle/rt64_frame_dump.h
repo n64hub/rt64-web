@@ -35,14 +35,22 @@
 // With RT64_FRAME_DUMP_SECONDS, only what comes between those seconds after the first present is written, a scene's
 // worth rather than gigabytes of the boot: about 40 MB a second of frames at 640 wide and 60 a second.
 //
+// With RT64_FRAME_DUMP_RATE=<Hz> too, RT64 presents at that rate whatever the display's is: the swap chain's vsync is
+// turned off (swapChainCreated()) and its rate taken as that one (swapChainRate()), so Framerate Display interpolates
+// to it. A desktop build presents frames between the game's only where the display is faster than the game, so a game
+// of 60 on a 59-60 Hz display presents none, and a dump of it tests nothing of how they pair: at 120 every other
+// frame is one of them. Where the device can't turn vsync off (Vulkan without its immediate present mode), the
+// presents stay held to the display's.
+//
 // The present thread copies each frame's picture into a buffer in that frame's own commands (plume's
 // copyTextureRegion into a placed footprint: D3D12, and Vulkan from the plume-web commit that adds it; Metal's reads
 // none back, so a desktop build's dump is for Windows and Linux), and box-filters it as the next frame is presented,
 // once those commands were waited for, which costs a present a few milliseconds: the dump is a test's, not a
 // player's. A frame's header is timed then, so a frame's time lags its own by one frame's.
 //
-// RT64 calls it from two places only, the present queue's readback() and the RSP's addTriangle(), and everything else
-// is here: a game's own changes to RT64 meet its lines in as few places as can be.
+// RT64 calls it from four places only, the present queue's readback(), the RSP's addTriangle(), the application's
+// swapChainCreated() and the shared resources' swapChainRate(), and everything else is here: a game's own changes to
+// RT64 meet its lines in as few places as can be.
 //
 // Frames go to a thread of their own, a few in hand at most: one that finds the queue full is dropped and counted in
 // the next header's dropped field, so a slow disk shows as a gap the tool knows, never as a slower game.
@@ -94,6 +102,7 @@ namespace RT64 {
         std::string dir;
         double fromSeconds = 0.0;
         double toSeconds = 1e30;
+        uint32_t rate = 0;
         std::chrono::steady_clock::time_point start;
         std::atomic<bool> started = false;
         FILE *framesFile = nullptr;
@@ -138,6 +147,11 @@ namespace RT64 {
                     sscanf(seconds, "%lf-%lf", &d->fromSeconds, &d->toSeconds);
                 }
 
+                const char *rate = getenv("RT64_FRAME_DUMP_RATE");
+                if (rate != nullptr) {
+                    d->rate = uint32_t(std::max(atoi(rate), 0));
+                }
+
                 d->framesFile = fopen((d->dir + "/frames.bin").c_str(), "wb");
                 d->sidesFile = fopen((d->dir + "/sides.tsv").c_str(), "w");
                 if ((d->framesFile == nullptr) || (d->sidesFile == nullptr)) {
@@ -151,6 +165,21 @@ namespace RT64 {
             }();
 
             return dump;
+        }
+
+        // RT64_FRAME_DUMP_RATE: the rate the swap chain is taken to present at, in place of the display's rate.
+        static uint32_t swapChainRate(uint32_t displayRate) {
+            const FrameDump *dump = get();
+            return ((dump != nullptr) && (dump->rate > 0)) ? dump->rate : displayRate;
+        }
+
+        // RT64_FRAME_DUMP_RATE: the swap chain's presents aren't held to the display's. Vulkan's present mode changes
+        // at its next resize(), which the present queue makes as soon as needsResize() says so.
+        static void swapChainCreated(RenderSwapChain *swapChain) {
+            const FrameDump *dump = get();
+            if ((dump != nullptr) && (dump->rate > 0)) {
+                swapChain->setVsyncEnabled(false);
+            }
         }
 
         static uint64_t nowMs() {
