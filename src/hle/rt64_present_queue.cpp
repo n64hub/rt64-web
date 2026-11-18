@@ -144,6 +144,7 @@ namespace RT64 {
 
         RenderTarget *colorTarget = nullptr;
         int32_t framesToPresent = 1;
+        bool shownAgain = false;
         bool lockedWorkloadMutex = false;
 #   if RT64_GAME_FRAME_WORKLOADS
         // The counters are taken under the lock the workload thread switches them under, and held until this present ends
@@ -229,18 +230,24 @@ namespace RT64 {
                 }
 
                 if (presentFb->interpolationEnabled) {
+                    // A frame whose frames a present has shown is shown again by none (InterpolatedFrameCounters::shown).
+                    {
+                        std::scoped_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
+                        shownAgain = (frameCounters.count > 1) && frameCounters.shown;
+                    }
+
                     // The workload thread resizes the manager's targets as it draws (RenderTarget::resize() frees their
                     // textures), so where this frame's own target is the first one drawn (without MSAA, or with nothing
                     // interpolated) it is held as for a frame with none interpolated, and let go once that frame is drawn,
                     // before an interpolated frame is waited for, which that thread draws holding it. Unheld, a resize as
                     // Turok's page let its game go after the boot shaders freed the textures the present had just taken,
                     // and Firefox stopped on a call through the freed texture's wrapper.
-                    if ((frameCounters.count == 1) || (!usingMSAA && (frameCounters.count > 1))) {
+                    if (!shownAgain && ((frameCounters.count == 1) || (!usingMSAA && (frameCounters.count > 1)))) {
                         lockedWorkloadMutex = true;
                         ext.sharedResources->workloadMutex.lock();
                     }
 
-                    framesToPresent = frameCounters.count;
+                    framesToPresent = shownAgain ? 0 : frameCounters.count;
                 }
                 else {
                     lockedWorkloadMutex = true;
@@ -446,6 +453,7 @@ namespace RT64 {
                 {
                     std::unique_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
                     frameCounters.presented = frameCountersNextPresented;
+                    frameCounters.shown = frameCounters.shown || (frameCountersNextPresented >= frameCounters.count);
                 }
 
                 ext.sharedResources->interpolatedCondition.notify_all();
@@ -510,6 +518,10 @@ namespace RT64 {
                 swapChainValid = ext.swapChain->present(swapChainIndex, &waitSemaphore, 1);
                 presentProfiler.logAndRestart();
             }
+        }
+
+        if (shownAgain) {
+            notifyPresentId(present);
         }
 
 #   if RT64_GAME_FRAME_WORKLOADS

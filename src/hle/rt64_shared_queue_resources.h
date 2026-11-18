@@ -23,6 +23,14 @@ namespace RT64 {
         uint32_t available = 0;
         uint32_t count = 0;
         bool skipped = false;
+        // Whether a present has shown these counters' last frame (PresentQueue::threadPresent()). A present that takes them
+        // after one has, the game's VI showing the frame again before its next was drawn, shows nothing: the screen holds
+        // that last frame. It showed every frame of the set again, the frame between the game's first, so the picture went
+        // back half a frame, and the targets those frames were in were already free: once a present has shown a frame, the
+        // next game frame draws into its target, so the frame shown again was half of the next one drawn, or all of it.
+        // Mario Golf's menus, now and then as a frame ran late, showed a character with a forearm gone for one frame, or
+        // an arm where the next pose put it. Unlike presented, which a dropped present sets too (skipInterpolation()).
+        bool shown = false;
 #   if RT64_GAME_FRAME_WORKLOADS
         // Whether a present is showing these counters' targets (PresentQueue::threadPresent()). A present waits for the
         // last workload that drew what it shows (State::advancePresent()), not the newest, so it can start after the next

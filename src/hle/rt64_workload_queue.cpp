@@ -515,6 +515,7 @@ namespace RT64 {
                     counters.available = 0;
                     counters.presented = counters.count;
                     counters.skipped = true;
+                    counters.shown = false;
                 }
 #           else
                 InterpolatedFrameCounters &curFrameCounters = ext.sharedResources->interpolatedFrames[ext.sharedResources->interpolatedFramesIndex];
@@ -1454,6 +1455,7 @@ namespace RT64 {
 #           endif
                 curFrameCounters.skipped = false;
                 curFrameCounters.presented = 0;
+                curFrameCounters.shown = false;
                 curFrameCounters.available = 0;
                 curFrameCounters.count = displayFrames;
 #           if RT64_GAME_FRAME_WORKLOADS
