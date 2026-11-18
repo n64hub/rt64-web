@@ -4,8 +4,8 @@
 
 #pragma once
 
-// RT64_FRAME_DUMP=<dir>, RT64_FRAME_DUMP_SECONDS=<from>-<to>: what a machine checks of a game's picture instead of an eye
-// (N64Recomp-browser's tools/frame_check.mjs), off unless the variable is set, for a desktop build or a test.
+// RT64_FRAME_DUMP=<dir>, RT64_FRAME_DUMP_SECONDS=<from>-<to>: what a machine checks of a game's picture instead of an
+// eye, off unless the variable is set, for a desktop build or a test.
 //
 // - <dir>/frames.bin: every frame presented, the frames interpolated between the game's included, each as its 40-byte
 //   header (FrameHeader) and its pixels, 8-bit RGB, rows top down, the picture box-filtered to at most MaxWidth wide.
