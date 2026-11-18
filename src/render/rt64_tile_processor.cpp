@@ -40,6 +40,8 @@ namespace RT64 {
                     lerpTile.ult = tileMap.prevUlt + (tileMap.curUlt - tileMap.prevUlt) * p.curFrameWeight;
                     lerpTile.lrs = tileMap.prevLrs + (tileMap.curLrs - tileMap.prevLrs) * p.curFrameWeight;
                     lerpTile.lrt = tileMap.prevLrt + (tileMap.curLrt - tileMap.prevLrt) * p.curFrameWeight;
+                    lerpTile.shifts *= tileMap.prevShiftsScale + (1.0f - tileMap.prevShiftsScale) * p.curFrameWeight;
+                    lerpTile.shiftt *= tileMap.prevShifttScale + (1.0f - tileMap.prevShifttScale) * p.curFrameWeight;
                 }
             }
         }

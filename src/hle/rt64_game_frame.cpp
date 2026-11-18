@@ -865,7 +865,44 @@ namespace RT64 {
                     float(prevCall.rect.lrx - curCall.rect.lrx), float(prevCall.rect.lry - curCall.rect.lry)) / 4.0f;
             }
 
-            if (!slides || !scrolled) {
+            // A rect cut at an edge it holds that changed size is drawn wider or narrower in the frames between, its
+            // texcoords at its corners as this frame has them, which stretches its texture across it: Mario Golf
+            // opens Course Select by moving Play Modes' halves out 12 pixels a side each game frame, each cut by the
+            // screen's edge, and a half was drawn stretched toward that edge and past where the next game frame puts
+            // it. So its texels are kept a pixel and move with the edge that moved, as the game moves them: each tile
+            // takes the texels a texcoord its drawn size in the frame before asks for, and its corners are placed so
+            // the texel at the moving edge is the one this frame has there, both interpolated like its corners. In
+            // pixels, the drawn size W moved by dW, the upper left edge by dU and the moving edge by dM; a texcoord t
+            // at the upper left and a scale of a texcoords a pixel give the frame before shifts * (W + dW) / W and its
+            // corners 4 * shifts * (t * dW / W + (dM - dU) * a) further on. It takes the place of the step slide on
+            // that axis, which it contains.
+            auto cutResize = [&](bool vertical, float &scale, float &corner) {
+                const bool cut = vertical ? cutT : cutS;
+                const int32_t curUl = vertical ? curCall.rect.uly : curCall.rect.ulx;
+                const int32_t curLr = vertical ? curCall.rect.lry : curCall.rect.lrx;
+                const int32_t prevUl = vertical ? prevCall.rect.uly : prevCall.rect.ulx;
+                const int32_t prevLr = vertical ? prevCall.rect.lry : prevCall.rect.lrx;
+                if (!cut || (curLr <= curUl) || ((prevLr - prevUl) == (curLr - curUl))) {
+                    return false;
+                }
+
+                const bool ulMoved = vertical ? (prevCall.gameRect.uly != curCall.gameRect.uly) : (prevCall.gameRect.ulx != curCall.gameRect.ulx);
+                const float width = float(curLr - curUl) / 4.0f;
+                const float dU = float(prevUl - curUl) / 4.0f;
+                const float dW = float((prevLr - prevUl) - (curLr - curUl)) / 4.0f;
+                const float dM = ulMoved ? dU : (float(prevLr - curLr) / 4.0f);
+                const float perPixel = float(vertical ? curCall.rectDtdy : curCall.rectDsdx) / 1024.0f;
+                const float texcoord = curTc[vertical ? 1 : 0];
+                scale = (width + dW) / width;
+                corner = texcoord * dW / width + (dM - dU) * perPixel;
+                return true;
+            };
+
+            float scaleS = 1.0f, cornerS = 0.0f, scaleT = 1.0f, cornerT = 0.0f;
+            const bool resizedS = moved && cutResize(false, scaleS, cornerS);
+            const bool resizedT = moved && cutResize(true, scaleT, cornerT);
+            const bool stepped = slides && scrolled;
+            if (!stepped && !resizedS && !resizedT) {
                 continue;
             }
 
@@ -874,14 +911,18 @@ namespace RT64 {
                 const uint32_t tileIndex = curCall.tileIndex + t;
                 const interop::RDPTile &tile = curData.rdpTiles[tileIndex];
                 GameFrameMap::TileMap &tileMap = workloadMap.tiles[tileIndex];
+                const float moveS = resizedS ? (tile.shifts * cornerS) : (stepped ? stepS[t] : 0.0f);
+                const float moveT = resizedT ? (tile.shiftt * cornerT) : (stepped ? stepT[t] : 0.0f);
                 tileMap.curUls = tile.uls;
                 tileMap.curUlt = tile.ult;
                 tileMap.curLrs = tile.lrs;
                 tileMap.curLrt = tile.lrt;
-                tileMap.prevUls = tile.uls + stepS[t] * 4.0f;
-                tileMap.prevUlt = tile.ult + stepT[t] * 4.0f;
-                tileMap.prevLrs = tile.lrs + stepS[t] * 4.0f;
-                tileMap.prevLrt = tile.lrt + stepT[t] * 4.0f;
+                tileMap.prevUls = tile.uls + moveS * 4.0f;
+                tileMap.prevUlt = tile.ult + moveT * 4.0f;
+                tileMap.prevLrs = tile.lrs + moveS * 4.0f;
+                tileMap.prevLrt = tile.lrt + moveT * 4.0f;
+                tileMap.prevShiftsScale = scaleS;
+                tileMap.prevShifttScale = scaleT;
                 tileMap.mapped = true;
             }
 

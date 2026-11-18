@@ -83,6 +83,12 @@ namespace RT64 {
             uint16_t slowFrames[4] = {};
             uint16_t slowSteps[4] = {};
             bool mapped = false;
+
+            // RT64_INTERPOLATE_RECT_SCROLLS: the tile's texels a texcoord (shifts, shiftt) in the frame before, as a
+            // multiple of its own, interpolated like the corners above: a rect cut at an edge it holds is drawn wider
+            // or narrower in the frames between, and its texture is scaled to keep its texels a pixel.
+            float prevShiftsScale = 1.0f;
+            float prevShifttScale = 1.0f;
         };
 
         struct LookAtMap {
