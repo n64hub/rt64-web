@@ -563,10 +563,15 @@ namespace RT64 {
     // font, another frame of an animation) shows its new texels unslid, and is still drawn nearer where it stood when it
     // moved. Last, a rect still unpaired pairs with the nearest that drew the same textures at the same scale with a
     // size of its own, where each way its edges stayed, moved together less than its side, one stayed and the other
-    // moved less than a quarter of its side, or both moved the same way less than its side and a pixel apart at most:
-    // a panorama's last strip that the game draws on to the bottom of the screen, its top following the strips above
-    // as the camera pitches and its bottom held there, or a strip of a sprite that moves by fractions of a pixel with
-    // its edges put on whole pixels, a pixel taller in some frames than in others. Each of a rect's
+    // moved less than a quarter of its side, both moved the same way less than its side and a pixel apart at most, or
+    // one stayed and the other moved less than its longer side with its texels: a panorama's last strip that the game
+    // draws on to the bottom of the screen, its top following the strips above as the camera pitches and its bottom
+    // held there, a strip of a sprite that moves by fractions of a pixel with its edges put on whole pixels, a pixel
+    // taller in some frames than in others, or a panorama's strip that crosses the top of the picture, a few rows high,
+    // its top held at the scissor's and its texcoord there stepping a row as its bottom moves a pixel (Mario Golf's
+    // hills as the camera pans: left unpaired, a row of the sky showed under it and its hills stood aside of those
+    // below in the frames between). That strip's texture slides by its step, however much of the rect's few rows it
+    // is. Each of a rect's
     // edges is drawn between where it was and where it is, its texcoords at its upper left, so it meets the strip above
     // in every frame between and leaves no row of what is behind it showing. A rect that changed texture, or its size
     // any other way, is drawn where the game put it. Places and sizes are compared as the game drew them, before the
@@ -652,13 +657,45 @@ namespace RT64 {
             return (abs(b.gameRect.ulx - a.gameRect.ulx) < side) && (abs(b.gameRect.uly - a.gameRect.uly) < side);
         };
 
+        // A rect the game cuts at an edge it holds (a strip of a panorama that crosses the top of the picture, held at
+        // the scissor as the panorama moves on under it): one edge stayed and the other moved less than the rect's
+        // longer side, and its texels moved with that edge, the texcoord at the held edge stepping by what it moved
+        // (where the texture's texel 0 falls, in pixels, moved by as much as the edge, within a quarter pixel). Its
+        // texture slides by that step, however large a part of the few texels the rect spans it is.
+        auto cutAt = [&](const RectCall &a, const RectCall &b, bool vertical) {
+            const DrawCall &ca = *a.call;
+            const DrawCall &cb = *b.call;
+            const int32_t aUl = vertical ? ca.gameRect.uly : ca.gameRect.ulx;
+            const int32_t aLr = vertical ? ca.gameRect.lry : ca.gameRect.lrx;
+            const int32_t bUl = vertical ? cb.gameRect.uly : cb.gameRect.ulx;
+            const int32_t bLr = vertical ? cb.gameRect.lry : cb.gameRect.lrx;
+            const int32_t ulMove = bUl - aUl;
+            const int32_t lrMove = bLr - aLr;
+            const int32_t edgeMove = (ulMove == 0) ? lrMove : ulMove;
+            if (((ulMove == 0) == (lrMove == 0)) || (abs(edgeMove) >= std::max(aLr - aUl, bLr - bUl))) {
+                return false;
+            }
+
+            const float aScale = float(vertical ? ca.rectDtdy : ca.rectDsdx) / 1024.0f;
+            const float bScale = float(vertical ? cb.rectDtdy : cb.rectDsdx) / 1024.0f;
+            if ((aScale == 0.0f) || (aScale != bScale)) {
+                return false;
+            }
+
+            // Texcoords follow the rect drawn, so texel 0's place is the drawn upper left's less its texcoord.
+            const uint32_t axis = vertical ? 1 : 0;
+            const float aAt = (float(vertical ? ca.rect.uly : ca.rect.ulx) / 4.0f) - (curData.triTcFloats[a.rawVertex * 2 + axis] / aScale);
+            const float bAt = (float(vertical ? cb.rect.uly : cb.rect.ulx) / 4.0f) - (prevData.triTcFloats[b.rawVertex * 2 + axis] / bScale);
+            return fabsf((bAt - aAt) - (float(edgeMove) / 4.0f)) <= 0.25f;
+        };
+
         // Each way, in quarter pixels, its edges stayed, moved together less than its side, one stayed and the other
         // moved less than a quarter of its side, or both moved the same way less than its side and a pixel apart at
         // most: a strip of a sprite drawn in strips, each edge put on a whole pixel as the sprite moves by fractions of
         // one (a 2D screen the game or its recomp scales), grows or shrinks by a pixel in the frames an edge rounds the
         // other way, and left unpaired it is drawn where the game put it while the strips beside it are drawn between,
-        // a row of what is behind them showing.
-        auto edgesFollow = [](const DrawCall &a, const DrawCall &b) {
+        // a row of what is behind them showing. Or, one way, the rect was cut there (cutAt).
+        auto edgesFollow = [&](const RectCall &ra, const RectCall &rb) {
             auto follows = [](int32_t aUl, int32_t aLr, int32_t bUl, int32_t bLr) {
                 const int32_t side = std::min(aLr - aUl, bLr - bUl);
                 const int32_t ulMove = bUl - aUl;
@@ -675,7 +712,10 @@ namespace RT64 {
                 return sameWay && (abs(ulMove) < side) && (abs(lrMove) < side) && (abs(lrMove - ulMove) <= 4);
             };
 
-            return follows(a.gameRect.ulx, a.gameRect.lrx, b.gameRect.ulx, b.gameRect.lrx) && follows(a.gameRect.uly, a.gameRect.lry, b.gameRect.uly, b.gameRect.lry);
+            const DrawCall &a = *ra.call;
+            const DrawCall &b = *rb.call;
+            return (follows(a.gameRect.ulx, a.gameRect.lrx, b.gameRect.ulx, b.gameRect.lrx) || cutAt(ra, rb, false)) &&
+                (follows(a.gameRect.uly, a.gameRect.lry, b.gameRect.uly, b.gameRect.lry) || cutAt(ra, rb, true));
         };
 
         // A step in a tile's texels, taken inside its period when it wraps or mirrors.
@@ -746,7 +786,7 @@ namespace RT64 {
             int32_t nearest = INT32_MAX;
             for (size_t j = 0; j < prevRects.size(); j++) {
                 const DrawCall &prevCall = *prevRects[j].call;
-                if (prevUsed[j] || sameSize(curCall, prevCall) || !edgesFollow(curCall, prevCall) || !sameLook(curCall, prevCall)) {
+                if (prevUsed[j] || sameSize(curCall, prevCall) || !sameLook(curCall, prevCall) || !edgesFollow(curRects[r], prevRects[j])) {
                     continue;
                 }
 
@@ -793,6 +833,8 @@ namespace RT64 {
             // The texels the rect spans in each direction: its size in pixels times its texels a pixel.
             const float spanS = (float(curCall.rect.lrx - curCall.rect.ulx) / 4.0f) * (fabsf(float(curCall.rectDsdx)) / 1024.0f);
             const float spanT = (float(curCall.rect.lry - curCall.rect.uly) / 4.0f) * (fabsf(float(curCall.rectDtdy)) / 1024.0f);
+            const bool cutS = cutAt(curRect, prevRects[found], false);
+            const bool cutT = cutAt(curRect, prevRects[found], true);
             float stepS[8];
             float stepT[8];
             bool scrolled = false;
@@ -801,8 +843,8 @@ namespace RT64 {
                 const interop::RDPTile &tile = curData.rdpTiles[curCall.tileIndex + t];
                 stepS[t] = insidePeriod(ds * tile.shifts, tile.masks, tile.cms);
                 stepT[t] = insidePeriod(dt * tile.shiftt, tile.maskt, tile.cmt);
-                slides = ((stepS[t] == 0.0f) || (fabsf(stepS[t]) < (spanS * tile.shifts / 4.0f))) &&
-                    ((stepT[t] == 0.0f) || (fabsf(stepT[t]) < (spanT * tile.shiftt / 4.0f)));
+                slides = (cutS || (stepS[t] == 0.0f) || (fabsf(stepS[t]) < (spanS * tile.shifts / 4.0f))) &&
+                    (cutT || (stepT[t] == 0.0f) || (fabsf(stepT[t]) < (spanT * tile.shiftt / 4.0f)));
                 scrolled = scrolled || (stepS[t] != 0.0f) || (stepT[t] != 0.0f);
             }
 
