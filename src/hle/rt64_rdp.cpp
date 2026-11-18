@@ -1329,7 +1329,6 @@ namespace RT64 {
         drawCall.minWorldMatrix = 0;
         drawCall.maxWorldMatrix = 0;
         drawCall.rect = drawRect;
-        drawCall.gameRect = unfixedRect;
         drawCall.rectDsdx = dsdx;
         drawCall.rectDtdy = dtdy;
         drawCall.rectLeftOrigin = extAlignment.leftOrigin;
@@ -1339,6 +1338,8 @@ namespace RT64 {
         if (flushedState) {
             state->loadDrawState();
         }
+
+        drawCall.gameRect = unfixedRect;
 
         auto &triPosFloats = workload.drawData.triPosFloats;
         auto &triTcFloats = workload.drawData.triTcFloats;

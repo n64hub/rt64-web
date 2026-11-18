@@ -111,7 +111,6 @@ namespace RT64 {
         drawCall.minWorldMatrix = USHRT_MAX;
         drawCall.maxWorldMatrix = 0;
         drawCall.rect.reset();
-        drawCall.gameRect.reset();
         drawCall.rectDsdx = 0;
         drawCall.rectDtdy = 0;
         drawCall.rectLeftOrigin = G_EX_ORIGIN_NONE;
