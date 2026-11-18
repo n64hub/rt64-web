@@ -75,6 +75,10 @@ namespace RT64 {
         uint16_t maxWorldMatrix;
         uint32_t triangleCount;
         FixedRect rect;
+
+        // The rect as the game drew it, before the enhancement that moves an edge within a pixel of the scissor's onto
+        // it (rect.fixRectLR): what RT64_INTERPOLATE_RECT_SCROLLS pairs rects by.
+        FixedRect gameRect;
         int16_t rectDsdx;
         int16_t rectDtdy;
         uint16_t rectLeftOrigin;

@@ -1265,6 +1265,7 @@ namespace RT64 {
         // different modes require adding an extra coordinate. Since this behavior often breaks detection
         // for widescreen hacks, an enhancement option to fix them is available given they're within the
         // tolerance of one pixel from the scissor coordinates.
+        const FixedRect unfixedRect(movedFromOrigin(ulx, extAlignment.leftOrigin), uly, movedFromOrigin(lrx, extAlignment.rightOrigin), lry);
         const FixedRect &scissorRect = state->rdp->scissorRectStack[scissorStackSize - 1];
         const bool fixRectLR = state->ext.enhancementConfig->rect.fixRectLR;
         if (!scissorRect.isNull() && fixRectLR) {
@@ -1328,6 +1329,7 @@ namespace RT64 {
         drawCall.minWorldMatrix = 0;
         drawCall.maxWorldMatrix = 0;
         drawCall.rect = drawRect;
+        drawCall.gameRect = unfixedRect;
         drawCall.rectDsdx = dsdx;
         drawCall.rectDtdy = dtdy;
         drawCall.rectLeftOrigin = extAlignment.leftOrigin;
