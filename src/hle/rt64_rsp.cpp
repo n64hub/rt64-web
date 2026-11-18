@@ -1228,7 +1228,7 @@ namespace RT64 {
 
         // RT64_FRAME_DUMP's sides.tsv: where across its view each triangle of the 3D world lies (rt64_frame_dump.h).
         FrameDump *frameDump = FrameDump::get();
-        if ((frameDump != nullptr) && visibleTri && !unprojectable && (getCurrentProjectionType() == Projection::Type::Perspective)) {
+        if ((frameDump != nullptr) && visibleTri && (getCurrentProjectionType() == Projection::Type::Perspective)) {
             const interop::RSPViewport &viewport = viewportStack[viewportStackSize - 1];
             const float halfWidth = std::abs(float(viewport.scale.x));
             float x0 = float(posScreen[globalIndices[0]][0]);
@@ -1238,7 +1238,7 @@ namespace RT64 {
                 x1 = std::max(x1, float(posScreen[globalIndices[i]][0]));
             }
 
-            frameDump->addTriangle(&workload, x0, x1, float(viewport.translate.x) - halfWidth, 2.0f * halfWidth);
+            frameDump->addTriangle(&workload, worldIndices[globalIndices[0]], unprojectable, x0, x1, float(viewport.translate.x) - halfWidth, 2.0f * halfWidth);
         }
 
         if (visibleTri && !scissorRect.isNull()) {

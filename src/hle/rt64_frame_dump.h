@@ -20,10 +20,17 @@
 // - <dir>/sides.tsv: for each workload the game's display lists drew (a line once the next one draws), how many of its triangles drawn through a
 //   perspective projection lie in each band of the picture's width (the middle of each one's span across it), in
 //   bands of the view's own width (BandsPerView a view) from one view left of it to one right, as
-//   "<workload's number in the dump>\t<ms since 1970>\t<count>\t<count>...". A game culls its world to its own 4:3 view, so with the
+//   "<workload's number in the dump>\t<ms since 1970>\t<count>\t<count>...\t<past>". A game culls its world to its own 4:3 view, so with the
 //   picture widened (Expand) its triangles thin out past that view's sides, which no frame shows as a fault where
 //   water or sky lies under the culled ground. A triangle counts once, where it lies, not in every band it reaches
-//   over: the ground's large triangles near the camera reach past both sides whatever is culled.
+//   over: the ground's large triangles near the camera reach past both sides whatever is culled. <past> is how many
+//   of the workload's model matrices (a triangle's is its first vertex's world transform) drew triangles that all lie
+//   wholly past the view's left side, or all wholly past its right: a whole object drawn off the view. A game that
+//   culls its objects to its 4:3 view draws next to none of them in a 4:3 window, whose picture is the view, where
+//   one that culls nothing by the window draws every object near enough past it, so the count tells the two apart in
+//   a 4:3 window's dump, which the bands can't: the world one draws past the view there reads alike in both. A
+//   level's ground is one matrix reaching into the view, and a matrix with a triangle reaching behind the camera
+//   counts as reaching it.
 //
 // With RT64_FRAME_DUMP_SECONDS, only what comes between those seconds after the first present is written, a scene's
 // worth rather than gigabytes of the boot: about 40 MB a second of frames at 640 wide and 60 a second.
@@ -97,6 +104,7 @@ namespace RT64 {
         std::thread writer;
         uint32_t droppedSinceLast = 0;
         uint32_t bands[Bands] = {};
+        std::vector<std::pair<float, float>> matrixSpans; // Each model matrix's triangles across the view, in view widths.
         const void *bandsWorkload = nullptr;
         uint64_t workloadNumber = 0;
         std::unique_ptr<RenderBuffer> readbackBuffer;
@@ -160,21 +168,29 @@ namespace RT64 {
         }
 
         // A triangle drawn through a perspective projection across view x from x0 to x1, its view's left edge at left
-        // and its width width, all in the same units (RSP::drawIndexedTri()'s posScreen and viewport), into the
-        // workload at workload: the last one's counts are written once another one draws. Game thread.
-        void addTriangle(const void *workload, float x0, float x1, float left, float width) {
+        // and its width width, all in the same units (RSP::drawIndexedTri()'s posScreen and viewport), with the model
+        // matrix matrix (its first vertex's world transform), into the workload at workload: the last one's counts are
+        // written once another one draws. An unprojectable one (a vertex behind the camera) has no place across the view,
+        // and only marks its matrix as reaching it. Game thread.
+        void addTriangle(const void *workload, uint32_t matrix, bool unprojectable, float x0, float x1, float left, float width) {
             if (workload != bandsWorkload) {
                 if ((bandsWorkload != nullptr) && inWindow()) {
+                    uint32_t past = 0;
+                    for (const auto &span : matrixSpans) {
+                        past += (span.first <= span.second) && ((span.second < 0.0f) || (span.first > 1.0f)) ? 1 : 0;
+                    }
+
                     fprintf(sidesFile, "%llu\t%llu", (unsigned long long)(workloadNumber), (unsigned long long)(nowMs()));
                     for (int b = 0; b < Bands; b++) {
                         fprintf(sidesFile, "\t%u", bands[b]);
                     }
 
-                    fprintf(sidesFile, "\n");
+                    fprintf(sidesFile, "\t%u\n", past);
                     fflush(sidesFile);
                 }
 
                 memset(bands, 0, sizeof(bands));
+                matrixSpans.clear();
                 bandsWorkload = workload;
                 workloadNumber++;
             }
@@ -182,6 +198,20 @@ namespace RT64 {
             if (!(width > 0.0f)) {
                 return;
             }
+
+            // Unused matrices are left an empty span (its start past its end), which counts nowhere.
+            if (matrix >= matrixSpans.size()) {
+                matrixSpans.resize(matrix + 1, { 1e30f, -1e30f });
+            }
+
+            auto &span = matrixSpans[matrix];
+            if (unprojectable) {
+                span = { -1e30f, 1e30f };
+                return;
+            }
+
+            span.first = std::min(span.first, (x0 - left) / width);
+            span.second = std::max(span.second, (x1 - left) / width);
 
             const float u = ((x0 + x1) * 0.5f - left) / width;
             const int b = int(std::floor((u + 1.0f) * BandsPerView));
