@@ -153,12 +153,15 @@ namespace RT64 {
         interop::int2 maxTexcoord;
         bool syncRequired;
         bool tileCopyUsed;
+#   if RT64_TILE_COPY_TMEM_FALLBACK
+        // What the tile samples in place of its tile copy when the call's texcoords reach past the copy (tileCopyWidth,
+        // tileCopyHeight): the TMEM hash it had before the copy was found for it.
+        uint64_t tileCopyFallbackHash;
+#   endif
 #   if defined(__EMSCRIPTEN__)
         // The tile copy was found for less TMEM than the tile can sample (FramebufferManager::checkRowTileCopy and
-        // checkLeadingTileCopy), so only the call's texcoords decide whether it is used, and the TMEM hash to sample if
-        // they leave it.
+        // checkLeadingTileCopy), so only the call's texcoords decide whether it is used.
         bool texcoordTileCopy;
-        uint64_t tileCopyFallbackHash;
 
         // Where the TMEM that asks for the sync begins (FramebufferManager::CheckCopyResult::syncTMEMStart), 0 if the
         // sync is asked for whatever the call samples.

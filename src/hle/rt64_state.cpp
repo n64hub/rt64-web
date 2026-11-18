@@ -397,7 +397,6 @@ namespace RT64 {
 
                         if (texcoordResult.valid()) {
                             dstCallTile.texcoordTileCopy = true;
-                            dstCallTile.tileCopyFallbackHash = rdp->tileReplacementHashes[tileIndex];
                             checkResult = texcoordResult;
                         }
                     }
@@ -405,6 +404,9 @@ namespace RT64 {
 
                     if (gpuCopiesEnabled && checkResult.valid()) {
                         dstCallTile.tileCopyUsed = true;
+#                   if RT64_TILE_COPY_TMEM_FALLBACK
+                        dstCallTile.tileCopyFallbackHash = rdp->tileReplacementHashes[tileIndex];
+#                   endif
                         dstCallTile.tmemHashOrID = checkResult.tileId;
                         dstCallTile.tileCopyWidth = checkResult.tileWidth;
                         dstCallTile.tileCopyHeight = checkResult.tileHeight;
@@ -1193,13 +1195,15 @@ namespace RT64 {
                 const bool insufficientHeight = (maxTexcoord.y > callTile.tileCopyHeight);
                 if (insufficientWidth || insufficientHeight) {
                     callTile.tileCopyUsed = false;
-#               if defined(__EMSCRIPTEN__)
-                    // A tile copy found for less than the tile can sample (texcoordTileCopy) that the texcoords leave
-                    // samples TMEM's contents as before. The sync this needs is the one the original check asked for
-                    // (syncRequired).
-                    if (callTile.texcoordTileCopy) {
-                        callTile.tmemHashOrID = callTile.tileCopyFallbackHash;
-                    }
+#               if RT64_TILE_COPY_TMEM_FALLBACK
+                    // A tile copy the texcoords leave samples TMEM's contents as the tile would have without one, not
+                    // the copy's ID taken for a TMEM hash, which uploadTile() gives an empty texture: the tile's rows
+                    // past the copy are in RAM, and the copy holds only as many of the framebuffer's rows as were last
+                    // drawn into it. Mario Golf's Ring Shot rings sample a 32x32 map of the scene the game rebuilds
+                    // each frame from strips, often fewer than its 32 rows, and the rings drew black until a frame drew
+                    // all of them. The sync this needs is the one the original check asked for (syncRequired), asked
+                    // for below as for any TMEM.
+                    callTile.tmemHashOrID = callTile.tileCopyFallbackHash;
 #               endif
                 }
                 else {
