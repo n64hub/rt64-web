@@ -417,8 +417,7 @@ namespace RT64 {
 
                 // RT64_FRAME_DUMP: the frame shown, read back for a test (rt64_frame_dump.h).
                 if (FrameDump *frameDump = FrameDump::get()) {
-                    frameDump->readback(ext.device, commandList, renderParams.texture, renderParams.textureFormat, renderParams.textureWidth,
-                        renderParams.textureHeight, present.presentId, uint32_t(i), uint32_t(framesToPresent));
+                    frameDump->readback(renderParams, present.presentId, uint32_t(i), uint32_t(framesToPresent));
                 }
 
                 {

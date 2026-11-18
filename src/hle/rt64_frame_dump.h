@@ -8,8 +8,12 @@
 // (N64Recomp-browser's tools/frame_check.mjs), off unless the variable is set, for a desktop build or a test.
 //
 // - <dir>/frames.bin: every frame presented, the frames interpolated between the game's included, each as its 40-byte
-//   header (FrameHeader) and its pixels, 8-bit RGB, rows top down, the frame's color target box-filtered to at most
-//   MaxWidth wide. A frame flickering into a wrong picture for a frame between two right ones (a model paired with a
+//   header (FrameHeader) and its pixels, 8-bit RGB, rows top down, the picture box-filtered to at most MaxWidth wide.
+//   The picture is the box of the frame's color target the VI draws from (VIRenderer::render()'s videoResolution, from
+//   its top left corner), not the whole target, which can be larger: the targets of the frames drawn between the
+//   game's are kept at the largest size drawn (a 1692x960 target for a 1280x720 picture), and one kept from a larger
+//   frame before holds that frame's picture past the box. So every frame of a picture's size comes out the same size,
+//   with nothing past it. A frame flickering into a wrong picture for a frame between two right ones (a model paired with a
 //   look-alike's place, a frame drawn in parts) is a frame the frames either side of it don't explain, which only
 //   consecutive frames tell: a window's captures come tens of milliseconds apart, at a random point between the
 //   game's frames, and a person or a model looking at one doesn't read a tree standing where another one stood.
@@ -24,7 +28,7 @@
 // With RT64_FRAME_DUMP_SECONDS, only what comes between those seconds after the first present is written, a scene's
 // worth rather than gigabytes of the boot: about 40 MB a second of frames at 640 wide and 60 a second.
 //
-// The present thread copies each frame's color target into a buffer in that frame's own commands (plume's
+// The present thread copies each frame's picture into a buffer in that frame's own commands (plume's
 // copyTextureRegion into a placed footprint: D3D12, and Vulkan from the plume-web commit that adds it; Metal's reads
 // none back, so a desktop build's dump is for Windows and Linux), and box-filters it as the next frame is presented,
 // once those commands were waited for, which costs a present a few milliseconds: the dump is a test's, not a
@@ -54,6 +58,7 @@
 #include <vector>
 
 #include "common/rt64_plume.h"
+#include "render/rt64_vi_renderer.h"
 
 namespace RT64 {
     struct FrameDump {
@@ -185,12 +190,10 @@ namespace RT64 {
             }
         }
 
-        // The frame a present shows, from its color target once the frame is drawn into it: read back by the
-        // present's commands, and handed on at the next one's, the present that read it back waited for since then.
-        // Present thread.
-        void readback(RenderDevice *device, RenderCommandList *commandList, RenderTexture *texture, RenderFormat format, uint32_t width,
-            uint32_t height, uint64_t presentId, uint32_t index, uint32_t count)
-        {
+        // The frame a present shows, from its color target once the frame is drawn into it (the VI renderer's p, which
+        // has drawn it): read back by the present's commands, and handed on at the next one's, the present that read it
+        // back waited for since then. Present thread.
+        void readback(const VIRenderer::RenderParams &p, uint64_t presentId, uint32_t index, uint32_t count) {
             if (readbackFrame.width > 0) {
                 const uint8_t *data = reinterpret_cast<const uint8_t *>(readbackBuffer->map());
                 if (data != nullptr) {
@@ -202,8 +205,18 @@ namespace RT64 {
                 readbackFrame.width = 0;
             }
 
-            const bool sixteenBits = (format == RenderFormat::R16G16B16A16_UNORM);
-            if ((texture == nullptr) || ((format != RenderFormat::R8G8B8A8_UNORM) && !sixteenBits)) {
+            const bool sixteenBits = (p.textureFormat == RenderFormat::R16G16B16A16_UNORM);
+            if ((p.texture == nullptr) || (p.vi == nullptr) || ((p.textureFormat != RenderFormat::R8G8B8A8_UNORM) && !sixteenBits)) {
+                return;
+            }
+
+            // The picture's box, as the VI shader reads the texture: the framebuffer's size at the target's scale.
+            const uint32_t fbWidth = p.vi->fbSize().x;
+            const uint32_t fbHeight = p.vi->fbSize().y;
+            const float scale = float(std::max(p.downsamplingScale, 1U));
+            const uint32_t width = std::min(p.textureWidth, uint32_t(std::lround(float(fbWidth) * float(p.resolutionScale.x) / scale)));
+            const uint32_t height = std::min(p.textureHeight, uint32_t(std::lround(float(fbHeight) * float(p.resolutionScale.y) / scale)));
+            if ((width == 0) || (height == 0)) {
                 return;
             }
 
@@ -211,15 +224,17 @@ namespace RT64 {
             const uint32_t rowPitch = ((width * pixelSize) + 255) & ~255U;
             const uint64_t size = uint64_t(rowPitch) * height;
             if ((readbackBuffer == nullptr) || (readbackBufferSize < size)) {
-                readbackBuffer = device->createBuffer(RenderBufferDesc::ReadbackBuffer(size));
+                readbackBuffer = p.device->createBuffer(RenderBufferDesc::ReadbackBuffer(size));
                 readbackBufferSize = size;
             }
 
-            commandList->barriers(RenderBarrierStage::COPY, RenderTextureBarrier(texture, RenderTextureLayout::COPY_SOURCE));
+            RenderCommandList *commandList = p.commandList;
+            const RenderBox box(0, 0, int32_t(width), int32_t(height));
+            commandList->barriers(RenderBarrierStage::COPY, RenderTextureBarrier(p.texture, RenderTextureLayout::COPY_SOURCE));
             commandList->barriers(RenderBarrierStage::COPY, RenderBufferBarrier(readbackBuffer.get(), RenderBufferAccess::WRITE));
-            commandList->copyTextureRegion(RenderTextureCopyLocation::PlacedFootprint(readbackBuffer.get(), format, width, height, 1, rowPitch / pixelSize),
-                RenderTextureCopyLocation::Subresource(texture));
-            commandList->barriers(RenderBarrierStage::GRAPHICS, RenderTextureBarrier(texture, RenderTextureLayout::SHADER_READ));
+            commandList->copyTextureRegion(RenderTextureCopyLocation::PlacedFootprint(readbackBuffer.get(), p.textureFormat, width, height, 1, rowPitch / pixelSize),
+                RenderTextureCopyLocation::Subresource(p.texture), 0, 0, 0, &box);
+            commandList->barriers(RenderBarrierStage::GRAPHICS, RenderTextureBarrier(p.texture, RenderTextureLayout::SHADER_READ));
             readbackFrame = { presentId, index, count, width, height, rowPitch, sixteenBits };
         }
 
