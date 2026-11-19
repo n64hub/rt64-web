@@ -586,7 +586,8 @@ namespace RT64 {
     // any other way, is drawn where the game put it. Places and sizes are compared as the game drew them, before the
     // enhancement that moves an edge within a pixel of the scissor's onto it (rect.fixRectLR): it grows or shrinks a
     // rect by a pixel in the frames its edge passes the scissor's, and a glyph that changed size there paired with its
-    // shadow, the same glyph drawn a pixel aside, so the frames between drew the line a pixel to the side.
+    // shadow, the same glyph drawn a pixel aside, so the frames between drew the line a pixel to the side. Last, a strip
+    // still unpaired that the frame before drew nothing of slides with the strip of its panorama it adjoins (below).
     static void matchRectScrolls(const Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &workloadMap, bool &tileInterpolationUsed) {
         struct RectCall {
             const DrawCall *call;
@@ -898,6 +899,16 @@ namespace RT64 {
             }
         }
 
+        // By a rect's index, the texcoords its upper left moved by from the frame before when its texture slides by
+        // them, for the strip that adjoins it with no pair of its own (below).
+        struct RectSlide {
+            float ds = 0.0f;
+            float dt = 0.0f;
+            bool slid = false;
+        };
+
+        thread_local std::vector<RectSlide> curSlides;
+        curSlides.assign(curRects.size(), RectSlide());
         for (size_t r = 0; r < curRects.size(); r++) {
             const size_t found = curFound[r];
             if (found == prevRects.size()) {
@@ -1021,7 +1032,94 @@ namespace RT64 {
                 tileMap.mapped = true;
             }
 
+            if (stepped) {
+                curSlides[r] = { resizedS ? 0.0f : ds, resizedT ? 0.0f : dt, true };
+            }
+
             tileInterpolationUsed = true;
+        }
+
+        // A strip of a panorama that the frame before drew nothing of, lying wholly past the screen's edge, has no rect
+        // there to pair with: the game cut it to an empty rect, which the RDP drops. It is the one that has just come
+        // in, cut at the edge as the panorama moves on to it, and left unslid it showed this frame's texels while the
+        // strip it adjoins slid toward them from the frame before's, so in the frames between it stood aside of the
+        // strips below by part of a step. One still unpaired that adjoins a rect whose texture slid, within a pixel,
+        // across the same columns (or rows) with the same texcoord there, at the same scale and with the same tile
+        // layout, is a strip of the same panorama, and its texture slides with that one's along the edge they share:
+        // Mario Golf's hills, a column of strips a few rows high, each its own texture, that the game scrolls sideways
+        // by their texcoords as the camera turns, a new strip coming in at the top as the camera pitches down.
+        auto adjoins = [&](const RectCall &ra, const RectCall &rb, bool vertical) {
+            const DrawCall &a = *ra.call;
+            const DrawCall &b = *rb.call;
+            const uint32_t along = vertical ? 0 : 1;
+            const bool sameSpan = vertical ? ((a.gameRect.ulx == b.gameRect.ulx) && (a.gameRect.lrx == b.gameRect.lrx)) :
+                ((a.gameRect.uly == b.gameRect.uly) && (a.gameRect.lry == b.gameRect.lry));
+            const int32_t aUl = vertical ? a.gameRect.uly : a.gameRect.ulx;
+            const int32_t aLr = vertical ? a.gameRect.lry : a.gameRect.lrx;
+            const int32_t bUl = vertical ? b.gameRect.uly : b.gameRect.ulx;
+            const int32_t bLr = vertical ? b.gameRect.lry : b.gameRect.lrx;
+            if (!sameSpan || ((abs(bUl - aLr) > 4) && (abs(aUl - bLr) > 4)) || (a.rectDsdx != b.rectDsdx) || (a.rectDtdy != b.rectDtdy) ||
+                (curData.triTcFloats[ra.rawVertex * 2 + along] != curData.triTcFloats[rb.rawVertex * 2 + along]) || (a.tileCount != b.tileCount))
+            {
+                return false;
+            }
+
+            for (uint32_t t = 0; t < a.tileCount; t++) {
+                const interop::RDPTile &ta = curData.rdpTiles[a.tileIndex + t];
+                const interop::RDPTile &tb = curData.rdpTiles[b.tileIndex + t];
+                if ((ta.fmt != tb.fmt) || (ta.siz != tb.siz) || (ta.masks != tb.masks) || (ta.maskt != tb.maskt) || (ta.cms != tb.cms) ||
+                    (ta.cmt != tb.cmt) || (ta.shifts != tb.shifts) || (ta.shiftt != tb.shiftt))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        };
+
+        // A strip that slides so passes it on to the next unpaired one: at a faster pitch the strip under the new one
+        // went from cut to whole, and paired with nothing either.
+        bool passedOn = true;
+        while (passedOn) {
+            passedOn = false;
+            for (size_t r = 0; r < curRects.size(); r++) {
+                if ((curFound[r] < prevRects.size()) || curSlides[r].slid) {
+                    continue;
+                }
+
+                const DrawCall &curCall = *curRects[r].call;
+                for (size_t q = 0; q < curRects.size(); q++) {
+                    const RectSlide slide = curSlides[q];
+                    const bool vertical = slide.slid && (slide.ds != 0.0f) && adjoins(curRects[r], curRects[q], true);
+                    if (!vertical && !(slide.slid && (slide.dt != 0.0f) && adjoins(curRects[r], curRects[q], false))) {
+                        continue;
+                    }
+
+                    for (uint32_t t = 0; t < curCall.tileCount; t++) {
+                        const uint32_t tileIndex = curCall.tileIndex + t;
+                        const interop::RDPTile &tile = curData.rdpTiles[tileIndex];
+                        GameFrameMap::TileMap &tileMap = workloadMap.tiles[tileIndex];
+                        const float moveS = vertical ? insidePeriod(slide.ds * tile.shifts, tile.masks, tile.cms) : 0.0f;
+                        const float moveT = vertical ? 0.0f : insidePeriod(slide.dt * tile.shiftt, tile.maskt, tile.cmt);
+                        tileMap.curUls = tile.uls;
+                        tileMap.curUlt = tile.ult;
+                        tileMap.curLrs = tile.lrs;
+                        tileMap.curLrt = tile.lrt;
+                        tileMap.prevUls = tile.uls + moveS * 4.0f;
+                        tileMap.prevUlt = tile.ult + moveT * 4.0f;
+                        tileMap.prevLrs = tile.lrs + moveS * 4.0f;
+                        tileMap.prevLrt = tile.lrt + moveT * 4.0f;
+                        tileMap.prevShiftsScale = 1.0f;
+                        tileMap.prevShifttScale = 1.0f;
+                        tileMap.mapped = true;
+                    }
+
+                    curSlides[r] = { vertical ? slide.ds : 0.0f, vertical ? 0.0f : slide.dt, true };
+                    passedOn = true;
+                    tileInterpolationUsed = true;
+                    break;
+                }
+            }
         }
     }
 #endif
