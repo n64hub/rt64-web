@@ -2,7 +2,6 @@
 // RT64
 //
 
-#include <algorithm>
 #include "rt64_projection_processor.h"
 
 #include "common/rt64_math.h"
@@ -141,14 +140,24 @@ namespace RT64 {
             }
 
             if (together && (curGroup.size() > 1)) {
+                // A group is a few writes, so an insertion sort finds the middle one.
                 thread_local std::vector<float> sorted;
-                const size_t middle = curGroup.size() / 2;
-                sorted = moveX;
-                std::nth_element(sorted.begin(), sorted.begin() + middle, sorted.end());
-                const float medianX = sorted[middle];
-                sorted = moveY;
-                std::nth_element(sorted.begin(), sorted.begin() + middle, sorted.end());
-                const float medianY = sorted[middle];
+                auto median = [](const std::vector<float> &values) {
+                    sorted = values;
+                    for (size_t i = 1; i < sorted.size(); i++) {
+                        const float v = sorted[i];
+                        size_t j = i;
+                        for (; (j > 0) && (sorted[j - 1] > v); j--) {
+                            sorted[j] = sorted[j - 1];
+                        }
+                        sorted[j] = v;
+                    }
+
+                    return sorted[sorted.size() / 2];
+                };
+
+                const float medianX = median(moveX);
+                const float medianY = median(moveY);
                 for (size_t k = 0; (k < curGroup.size()) && together; k++) {
                     together = (std::abs(moveX[k] - medianX) <= (maxDx / 4.0f)) && (std::abs(moveY[k] - medianY) <= (maxDy / 4.0f));
                 }
