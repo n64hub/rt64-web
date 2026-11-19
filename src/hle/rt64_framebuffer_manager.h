@@ -102,10 +102,6 @@ namespace RT64 {
 
         struct CheckCopyResult {
             uint64_t tileId = 0;
-
-            // What the copy holds (tileCopySource), which the ID, reused from frame to frame for whichever copy of its
-            // size is made, doesn't say.
-            uint64_t source = 0;
             uint32_t tileWidth = 0;
             uint32_t tileHeight = 0;
             uint32_t lineWidth = 0;
@@ -195,6 +191,7 @@ namespace RT64 {
         uint64_t getUsedTimestamp() const;
         uint64_t findTileCopyId(uint32_t width, uint32_t height);
         bool regionsTMEMUseTileCopy(uint64_t tileCopyId) const;
+        uint64_t tileCopySource(uint64_t tileCopyId, uint32_t tmemStart) const;
         void createTileCopySetup(RenderWorker *renderWorker, const FramebufferOperation &op, hlslpp::float2 resolutionScale, RenderTargetManager &targetManager, std::unordered_set<RenderTarget *> *resizedTargets);
         void createTileCopyRecord(RenderWorker *renderWorker, const FramebufferOperation &op, const FramebufferStorage &fbStorage, RenderTargetManager &targetManager,
             hlslpp::float2 resolutionScale, uint32_t maxFbPairIndex, CommandListCopies &cmdListCopies, CommandListDiscards &cmdListDiscards, const ShaderLibrary *shaderLibrary);

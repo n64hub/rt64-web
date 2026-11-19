@@ -22,14 +22,6 @@ namespace RT64 {
         height = ((height + SizeMultiple - 1) / SizeMultiple) * SizeMultiple;
     }
 
-    // What a tile copy holds, the same from frame to frame where its ID isn't: the framebuffer's address, the rect of
-    // it copied, its format and line, and where in that the TMEM the tile samples begins.
-    static uint64_t tileCopySource(const FramebufferTile &fbTile, uint32_t tmemOffset) {
-        const uint32_t key[] = { fbTile.address, fbTile.left, fbTile.top, fbTile.right, fbTile.bottom, fbTile.lineWidth,
-            (uint32_t(fbTile.siz) << 8) | fbTile.fmt, tmemOffset };
-        return XXH3_64bits(key, sizeof(key));
-    }
-
     // FramebufferManager
 
     FramebufferManager::FramebufferManager() {
@@ -715,7 +707,6 @@ namespace RT64 {
             }
 
             result.tileId = region.tileCopyId;
-            result.source = tileCopySource(fbTile, 0);
             result.tileWidth = tileWidth;
             result.lineWidth = tileWidth;
             result.tileHeight = 1;
@@ -740,7 +731,6 @@ namespace RT64 {
             }
 
             result.tileId = region.tileCopyId;
-            result.source = tileCopySource(fbTile, 0);
             result.tileWidth = fbTile.right - fbTile.left;
             result.lineWidth = fbTile.lineWidth;
             result.tileHeight = fbTile.bottom - fbTile.top;
@@ -850,7 +840,6 @@ namespace RT64 {
 
                 if (validCopy) {
                     result.tileId = it->tileCopyId;
-                    result.source = tileCopySource(it->fbTile, tmemStart - it->tmemStart);
                     result.tileWidth = tileWidth;
                     result.lineWidth = tileLineWidth;
                     result.tileHeight = it->fbTile.bottom - it->fbTile.top;
@@ -931,6 +920,23 @@ namespace RT64 {
         }
 
         return false;
+    }
+
+    // What the tile copy tileCopyId found for TMEM from tmemStart holds, the same from frame to frame where its ID,
+    // reused for whichever copy of its size is made next, isn't: the framebuffer's address, the rect of it copied, its
+    // format and line, and where in the TMEM region it was loaded to tmemStart is. 0 when no region holds it there.
+    // Looked up after the check that found the copy (checkRegionsTMEM() and the rest), from the same regions.
+    uint64_t FramebufferManager::tileCopySource(uint64_t tileCopyId, uint32_t tmemStart) const {
+        for (const RegionTMEM &region : activeRegionsTMEM) {
+            if ((region.tileCopyId == tileCopyId) && (tmemStart >= region.tmemStart) && (tmemStart < region.tmemEnd)) {
+                const FramebufferTile &fbTile = region.fbTile;
+                const uint32_t key[] = { fbTile.address, fbTile.left, fbTile.top, fbTile.right, fbTile.bottom, fbTile.lineWidth,
+                    (uint32_t(fbTile.siz) << 8) | fbTile.fmt, tmemStart - region.tmemStart };
+                return XXH3_64bits(key, sizeof(key));
+            }
+        }
+
+        return 0;
     }
 
     uint64_t FramebufferManager::findTileCopyId(uint32_t width, uint32_t height) {
