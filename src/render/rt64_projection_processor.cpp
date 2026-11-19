@@ -2,6 +2,7 @@
 // RT64
 //
 
+#include <algorithm>
 #include "rt64_projection_processor.h"
 
 #include "common/rt64_math.h"
@@ -37,8 +38,8 @@ namespace RT64 {
     // can pair a projection with an equal one the writes didn't go through (Mario Golf's flagstick writes, through its
     // sixth projection, which the map paired with the frame before's third, of none). Each pair is drawn between its
     // two by the frame's weight, in the quarter pixels the RSP takes. A projection the map pairs with none (a camera
-    // cut, RT64_SKIP_CAMERA_CUTS) leaves its writes the game's, and so does a pair further apart than half the view,
-    // which is no motion of one thing between two frames. Returns whether any write was paired, so the copy is
+    // cut, RT64_SKIP_CAMERA_CUTS) leaves its writes the game's, and so does a group whose writes didn't move together
+    // (below), which is no motion of one thing between two frames. Returns whether any write was paired, so the copy is
     // uploaded in every present of the frame, its last (weight 1) included, which puts the game's own positions back
     // over the frames between.
     bool ProjectionProcessor::interpolateScreenWrites(const ProcessParams &p, uint32_t w, std::vector<uint32_t> &modifyPosUints) {
@@ -111,29 +112,64 @@ namespace RT64 {
                 continue;
             }
 
+            // The group is paired whole or not at all, and only when its writes moved together: each no further from the
+            // group's median motion than an eighth of the view each way, and none further than half the view. A game that
+            // draws a strip of quads from a few vertices it writes again and again (Mario Golf's ball tracer) writes a
+            // varying number of them in a varying order, so two frames' groups of one size can be other quads, and a pair
+            // of the wrong ones drawn between stretched a quad across the picture; and a pair left out of a group that
+            // moved by about the limit left that quad's other corners drawn between, a quad as long as half the view.
             const interop::RSPViewport &viewport = curData.rspViewports[t];
             const float maxDx = std::abs(float(viewport.scale.x)) * 4.0f;
             const float maxDy = std::abs(float(viewport.scale.y)) * 4.0f;
+            auto unpack = [](uint32_t value, float &x, float &y) {
+                x = float(int16_t((value >> 16) & 0xFFFF));
+                y = float(int16_t(value & 0xFFFF));
+            };
+
+            thread_local std::vector<float> moveX;
+            thread_local std::vector<float> moveY;
+            moveX.resize(curGroup.size());
+            moveY.resize(curGroup.size());
+            bool together = true;
+            for (size_t k = 0; (k < curGroup.size()) && together; k++) {
+                float curX, curY, prevX, prevY;
+                unpack(curData.modifyPosUints[curGroup[k] + 1], curX, curY);
+                unpack(prevData.modifyPosUints[(*prevGroup)[k] + 1], prevX, prevY);
+                moveX[k] = curX - prevX;
+                moveY[k] = curY - prevY;
+                together = (std::abs(moveX[k]) <= maxDx) && (std::abs(moveY[k]) <= maxDy);
+            }
+
+            if (together && (curGroup.size() > 1)) {
+                thread_local std::vector<float> sorted;
+                const size_t middle = curGroup.size() / 2;
+                sorted = moveX;
+                std::nth_element(sorted.begin(), sorted.begin() + middle, sorted.end());
+                const float medianX = sorted[middle];
+                sorted = moveY;
+                std::nth_element(sorted.begin(), sorted.begin() + middle, sorted.end());
+                const float medianY = sorted[middle];
+                for (size_t k = 0; (k < curGroup.size()) && together; k++) {
+                    together = (std::abs(moveX[k] - medianX) <= (maxDx / 4.0f)) && (std::abs(moveY[k] - medianY) <= (maxDy / 4.0f));
+                }
+            }
+
+            if (!together) {
+                continue;
+            }
+
+            auto quarters = [](float v) {
+                int32_t rounded = int32_t(v + ((v >= 0.0f) ? 0.5f : -0.5f));
+                rounded = (rounded < -32768) ? -32768 : ((rounded > 32767) ? 32767 : rounded);
+                return uint32_t(uint16_t(int16_t(rounded)));
+            };
+
             for (size_t k = 0; k < curGroup.size(); k++) {
                 const size_t m = curGroup[k];
-                const uint32_t curValue = curData.modifyPosUints[m + 1];
-                const uint32_t prevValue = prevData.modifyPosUints[(*prevGroup)[k] + 1];
-                const float curX = float(int16_t((curValue >> 16) & 0xFFFF));
-                const float curY = float(int16_t(curValue & 0xFFFF));
-                const float prevX = float(int16_t((prevValue >> 16) & 0xFFFF));
-                const float prevY = float(int16_t(prevValue & 0xFFFF));
-                if ((std::abs(curX - prevX) > maxDx) || (std::abs(curY - prevY) > maxDy)) {
-                    continue;
-                }
-
-                auto quarters = [](float v) {
-                    int32_t rounded = int32_t(v + ((v >= 0.0f) ? 0.5f : -0.5f));
-                    rounded = (rounded < -32768) ? -32768 : ((rounded > 32767) ? 32767 : rounded);
-                    return uint32_t(uint16_t(int16_t(rounded)));
-                };
-
-                const float x = prevX + (curX - prevX) * p.curFrameWeight;
-                const float y = prevY + (curY - prevY) * p.curFrameWeight;
+                float prevX, prevY;
+                unpack(prevData.modifyPosUints[(*prevGroup)[k] + 1], prevX, prevY);
+                const float x = prevX + moveX[k] * p.curFrameWeight;
+                const float y = prevY + moveY[k] * p.curFrameWeight;
                 modifyPosUints[m + 1] = (quarters(x) << 16) | quarters(y);
                 pairedAny = true;
             }
