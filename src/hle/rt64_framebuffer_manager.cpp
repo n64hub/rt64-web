@@ -922,21 +922,45 @@ namespace RT64 {
         return false;
     }
 
-    // What the tile copy tileCopyId found for TMEM from tmemStart holds, the same from frame to frame where its ID,
-    // reused for whichever copy of its size is made next, isn't: the framebuffer's address, the rect of it copied, its
-    // format and line, and where in the TMEM region it was loaded to tmemStart is. 0 when no region holds it there.
-    // Looked up after the check that found the copy (checkRegionsTMEM() and the rest), from the same regions.
-    uint64_t FramebufferManager::tileCopySource(uint64_t tileCopyId, uint32_t tmemStart) const {
+    // What the tile copy tileCopyId found for a tile at TMEM address tmem holds, the same from frame to frame where its
+    // ID, reused for whichever copy of its size is made next, isn't: the framebuffer's address, the rect of it copied,
+    // its format and line, and where the tile's TMEM is in the region the copy was loaded to. Looked up after the check
+    // that found the copy (checkRegionsTMEM() and the rest), from the same regions, by the tile's own address: the
+    // region with the copy's ID that holds it, or holds it masked to TMEM's lower half (as an RGBA32 or TLUT tile is
+    // checked), or else, for a tile whose range wrapped around TMEM and was checked whole, the first with the copy's ID.
+    // 0 when no region has the ID.
+    uint64_t FramebufferManager::tileCopySource(uint64_t tileCopyId, uint32_t tmem) const {
+        const RegionTMEM *found = nullptr;
+        uint32_t offset = 0;
         for (const RegionTMEM &region : activeRegionsTMEM) {
-            if ((region.tileCopyId == tileCopyId) && (tmemStart >= region.tmemStart) && (tmemStart < region.tmemEnd)) {
-                const FramebufferTile &fbTile = region.fbTile;
-                const uint32_t key[] = { fbTile.address, fbTile.left, fbTile.top, fbTile.right, fbTile.bottom, fbTile.lineWidth,
-                    (uint32_t(fbTile.siz) << 8) | fbTile.fmt, tmemStart - region.tmemStart };
-                return XXH3_64bits(key, sizeof(key));
+            if (region.tileCopyId != tileCopyId) {
+                continue;
+            }
+
+            const uint32_t lowerTMEM = tmem & RDP_TMEM_MASK128;
+            if ((tmem >= region.tmemStart) && (tmem < region.tmemEnd)) {
+                found = &region;
+                offset = tmem - region.tmemStart;
+                break;
+            }
+            else if ((lowerTMEM >= region.tmemStart) && (lowerTMEM < region.tmemEnd)) {
+                found = &region;
+                offset = lowerTMEM - region.tmemStart;
+                break;
+            }
+            else if (found == nullptr) {
+                found = &region;
             }
         }
 
-        return 0;
+        if (found == nullptr) {
+            return 0;
+        }
+
+        const FramebufferTile &fbTile = found->fbTile;
+        const uint32_t key[] = { fbTile.address, fbTile.left, fbTile.top, fbTile.right, fbTile.bottom, fbTile.lineWidth,
+            (uint32_t(fbTile.siz) << 8) | fbTile.fmt, offset };
+        return XXH3_64bits(key, sizeof(key));
     }
 
     uint64_t FramebufferManager::findTileCopyId(uint32_t width, uint32_t height) {

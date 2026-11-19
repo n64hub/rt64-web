@@ -408,12 +408,7 @@ namespace RT64 {
                         dstCallTile.tileCopyFallbackHash = rdp->tileReplacementHashes[tileIndex];
 #                   endif
                         dstCallTile.tmemHashOrID = checkResult.tileId;
-#                   if defined(__EMSCRIPTEN__)
-                        const uint32_t copyTMEMStart = dstCallTile.texcoordTileCopy ? tile.tmem : checkTMEMStart;
-#                   else
-                        const uint32_t copyTMEMStart = checkTMEMStart;
-#                   endif
-                        dstCallTile.tileCopySource = framebufferManager.tileCopySource(checkResult.tileId, copyTMEMStart);
+                        dstCallTile.tileCopySource = framebufferManager.tileCopySource(checkResult.tileId, tile.tmem);
                         dstCallTile.tileCopyWidth = checkResult.tileWidth;
                         dstCallTile.tileCopyHeight = checkResult.tileHeight;
 
