@@ -408,6 +408,7 @@ namespace RT64 {
                         dstCallTile.tileCopyFallbackHash = rdp->tileReplacementHashes[tileIndex];
 #                   endif
                         dstCallTile.tmemHashOrID = checkResult.tileId;
+                        dstCallTile.tileCopySource = checkResult.source;
                         dstCallTile.tileCopyWidth = checkResult.tileWidth;
                         dstCallTile.tileCopyHeight = checkResult.tileHeight;
 
@@ -423,6 +424,7 @@ namespace RT64 {
                     }
                     else {
                         dstCallTile.tileCopyUsed = false;
+                        dstCallTile.tileCopySource = 0;
                         dstCallTile.tmemHashOrID = rdp->tileReplacementHashes[tileIndex];
 
 #                   if defined(__EMSCRIPTEN__)

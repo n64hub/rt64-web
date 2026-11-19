@@ -102,6 +102,10 @@ namespace RT64 {
 
         struct CheckCopyResult {
             uint64_t tileId = 0;
+
+            // What the copy holds (tileCopySource), which the ID, reused from frame to frame for whichever copy of its
+            // size is made, doesn't say.
+            uint64_t source = 0;
             uint32_t tileWidth = 0;
             uint32_t tileHeight = 0;
             uint32_t lineWidth = 0;

@@ -22,6 +22,14 @@ namespace RT64 {
         height = ((height + SizeMultiple - 1) / SizeMultiple) * SizeMultiple;
     }
 
+    // What a tile copy holds, the same from frame to frame where its ID isn't: the framebuffer's address, the rect of
+    // it copied, its format and line, and where in that the TMEM the tile samples begins.
+    static uint64_t tileCopySource(const FramebufferTile &fbTile, uint32_t tmemOffset) {
+        const uint32_t key[] = { fbTile.address, fbTile.left, fbTile.top, fbTile.right, fbTile.bottom, fbTile.lineWidth,
+            (uint32_t(fbTile.siz) << 8) | fbTile.fmt, tmemOffset };
+        return XXH3_64bits(key, sizeof(key));
+    }
+
     // FramebufferManager
 
     FramebufferManager::FramebufferManager() {
@@ -707,6 +715,7 @@ namespace RT64 {
             }
 
             result.tileId = region.tileCopyId;
+            result.source = tileCopySource(fbTile, 0);
             result.tileWidth = tileWidth;
             result.lineWidth = tileWidth;
             result.tileHeight = 1;
@@ -731,6 +740,7 @@ namespace RT64 {
             }
 
             result.tileId = region.tileCopyId;
+            result.source = tileCopySource(fbTile, 0);
             result.tileWidth = fbTile.right - fbTile.left;
             result.lineWidth = fbTile.lineWidth;
             result.tileHeight = fbTile.bottom - fbTile.top;
@@ -840,6 +850,7 @@ namespace RT64 {
 
                 if (validCopy) {
                     result.tileId = it->tileCopyId;
+                    result.source = tileCopySource(it->fbTile, tmemStart - it->tmemStart);
                     result.tileWidth = tileWidth;
                     result.lineWidth = tileLineWidth;
                     result.tileHeight = it->fbTile.bottom - it->fbTile.top;

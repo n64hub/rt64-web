@@ -174,6 +174,10 @@ namespace RT64 {
 #   endif
         uint16_t tileCopyWidth;
         uint16_t tileCopyHeight;
+
+        // What the tile copy holds when one is used (FramebufferManager::CheckCopyResult::source), where tmemHashOrID is
+        // only the copy's ID: matchRectScrolls pairs rects drawn from tile copies by it.
+        uint64_t tileCopySource;
         bool reinterpretTile;
         uint8_t reinterpretSiz;
         uint8_t reinterpretFmt;

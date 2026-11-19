@@ -610,7 +610,14 @@ namespace RT64 {
     // the panorama moves on, is held there in the frames between, its texels moving with its other edge, as at an edge
     // that stayed: the strip of Mario Golf's hills under one that has just left the picture over the top as the camera
     // pitches down, drawn between where its top was and the scissor, showed the clear color's dark blue in the
-    // picture's top row.
+    // picture's top row. A rect drawn from a tile copy (a picture of the framebuffer) pairs by what the copy holds,
+    // the framebuffer and the part of it copied (DrawCallTile::tileCopySource), not by the copy's ID, which stands in
+    // for its TMEM hash: a copy is reused for whichever copy of its size is made next, so the same ID in the frame
+    // before is another picture or another part of it. Mario Golf's intro fades one shot into the next by copying the
+    // old shot into a buffer in 38 strips the first frame and drawing them back over the new shot every frame, each
+    // strip a copy of its part of the buffer: in the second frame each strip paired by its ID with a copy strip of the
+    // first that many rows lower, and the frames between drew the top half of the old shot slid down, the new shot
+    // uncovered above it.
     // Rects that sample no texture are paired among themselves, apart from the textured ones, so a rect of either kind
     // never changes what the other's runs of owns are: one that draws a colour (a combiner of primitive or environment
     // colour alone, or a fill) has the same look as one that draws it with the same combiner, other modes and colours,
@@ -669,7 +676,7 @@ namespace RT64 {
             return (float(a.x) == float(b.x)) && (float(a.y) == float(b.y)) && (float(a.z) == float(b.z)) && (float(a.w) == float(b.w));
         };
 
-        // The same textures, whatever the rect's size and scale.
+        // The same textures, whatever the rect's size and scale; a tile copy's by what it holds, not by its ID.
         auto sameTiles = [&](const DrawCall &a, const DrawCall &b) {
             if (a.tileCount != b.tileCount) {
                 return false;
@@ -682,9 +689,14 @@ namespace RT64 {
             }
 
             for (uint32_t t = 0; t < a.tileCount; t++) {
+                const DrawCallTile &ca = curData.callTiles[a.tileIndex + t];
+                const DrawCallTile &cb = prevData.callTiles[b.tileIndex + t];
+                const bool sameTexels = (ca.tileCopyUsed || cb.tileCopyUsed) ?
+                    (ca.tileCopyUsed && cb.tileCopyUsed && (ca.tileCopySource == cb.tileCopySource)) :
+                    (ca.tmemHashOrID == cb.tmemHashOrID);
                 const interop::RDPTile &ta = curData.rdpTiles[a.tileIndex + t];
                 const interop::RDPTile &tb = prevData.rdpTiles[b.tileIndex + t];
-                if ((curData.callTiles[a.tileIndex + t].tmemHashOrID != prevData.callTiles[b.tileIndex + t].tmemHashOrID) ||
+                if (!sameTexels ||
                     (ta.fmt != tb.fmt) || (ta.siz != tb.siz) || (ta.palette != tb.palette) || (ta.masks != tb.masks) || (ta.maskt != tb.maskt) ||
                     (ta.cms != tb.cms) || (ta.cmt != tb.cmt) || (ta.shifts != tb.shifts) || (ta.shiftt != tb.shiftt) ||
                     (ta.uls != tb.uls) || (ta.ult != tb.ult) || (ta.lrs != tb.lrs) || (ta.lrt != tb.lrt))
