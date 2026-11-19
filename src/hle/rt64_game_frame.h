@@ -49,8 +49,8 @@ namespace RT64 {
             bool mapped = false;
 
             // How far the camera's eye moved from the game frame before, in its near plane's distances, for the next
-            // frame's cut check (RT64_SKIP_CAMERA_CUTS); 0 after a cut, or with no frame before.
-            float eyeStep = 0.0f;
+            // frame's cut check (RT64_SKIP_CAMERA_CUTS); -1 when that isn't known (after a cut, or with no frame before).
+            float eyeStep = -1.0f;
         };
 
         struct TransformMap {

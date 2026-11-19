@@ -283,9 +283,11 @@ namespace RT64 {
 #if RT64_SKIP_CAMERA_CUTS
     // Whether a perspective camera cut from one shot to another between two game frames, rather than moved: it turned
     // more than 45 degrees in one game frame, or its eye jumped more than 8 of its near plane's distances and more than 4
-    // times as far as it moved the frame before. eyeStep is set to how far the eye moved, in near plane distances, for
-    // the next frame's check, or 0 after a cut, and to 0 for a camera these can't be read from (no near plane, a matrix
-    // that isn't finite or can't be inverted), which is never called a cut.
+    // times as far as it moved the frame before, or it held still the frame before (its eye moved less than a twentieth
+    // of a near plane distance) and now turned more than 20 degrees or jumped more than 4. eyeStep is set to how far the
+    // eye moved, in near plane distances, for the next frame's check, or to -1 (not known) after a cut and for a camera
+    // these can't be read from (no near plane, a matrix that isn't finite or can't be inverted), which is never called a
+    // cut; prevEyeStep is -1 when the frame before's isn't known.
     //
     // A game that draws its frames with no matrix groups of its own pairs the camera of each frame with the one before,
     // and RT64's frames between drew the cut halfway: Mario Golf cuts from the golfer to the ball and from the ball to
@@ -293,13 +295,16 @@ namespace RT64 {
     // between drew its trees stretched to several times their height for a frame. Its cameras that move (its flyovers,
     // the ball's flight) moved at most about 7 near plane distances and turned at most about 24 degrees a game frame, and
     // its fastest moved as fast for many frames running, which the second check's ratio to the frame before leaves out.
+    // Its end credits cut from one golfer's shot to the next, each shot a camera that holds still, by turning it 30-43
+    // degrees and moving its eye 1-7 near plane distances, under both of those, and the frames between drew the next
+    // golfer partway from one camera to the other: a camera that moves from rest by that much in one game frame cut.
     //
     // The turn is the whole turn from one camera to the other, the angle of the rotation between their axes, and not only
     // how far the way the camera looks moved: San Francisco Rush 2049's attract race cuts between cameras that look
     // straight down at the cars by rolling about the way they look, turning the picture 86-180 degrees, which left the
     // way they look where it was.
     static bool isCameraCut(const hlslpp::float4x4 &curView, const hlslpp::float4x4 &curProj, const hlslpp::float4x4 &prevView, float prevEyeStep, float &eyeStep) {
-        eyeStep = 0.0f;
+        eyeStep = -1.0f;
 
         // The near plane's distance from a GL-style perspective (w = z * m23), whatever the scale it was built at.
         const float nearDenominator = float(curProj[2][2]) + float(curProj[2][3]);
@@ -337,6 +342,14 @@ namespace RT64 {
         const float MinJump = 8.0f;
         const float MinJumpRatio = 4.0f;
         if ((turnCosine < MaxTurnCosine) || ((step > MinJump) && (step > (prevEyeStep * MinJumpRatio)))) {
+            return true;
+        }
+
+        const float MaxStillStep = 0.05f;
+        const float MaxStillTurnCosine = 0.9397f;
+        const float MinStillJump = 4.0f;
+        const bool wasStill = (prevEyeStep >= 0.0f) && (prevEyeStep < MaxStillStep);
+        if (wasStill && ((turnCosine < MaxStillTurnCosine) || (step > MinStillJump))) {
             return true;
         }
 
@@ -1499,7 +1512,7 @@ namespace RT64 {
                     // and neither does anything its scene draws: the frames between draw the new frame as it is, where
                     // a cut drawn halfway put the world between two places (isCameraCut()).
                     if (viewProjMap.mapped && (curProj.type == Projection::Type::Perspective) && (prevProj.type == Projection::Type::Perspective)) {
-                        float prevEyeStep = 0.0f;
+                        float prevEyeStep = -1.0f;
                         if (firstPrevWorkloadMap != nullptr) {
                             prevEyeStep = firstPrevWorkloadMap->viewProjections[prevProj.transformsIndex].eyeStep;
                         }
