@@ -560,7 +560,10 @@ namespace RT64 {
     // textures drawn in several places, each cut by the screen's edge as they slide off it, a frame or two apart (Mario
     // Golf's save menu, three slots of one wooden strip), take on each other's sizes, and a slot paired with the one
     // above it, its own cut strip being nearer. That is the rect itself, cut to another size, which the last pass
-    // pairs. When every corner's
+    // pairs. A rect drawn in the same place in both frames' order of rects, the frames having drawn the same ones in
+    // the same order before and after it, pairs with that one alone, in every pass, or with none: a glyph of a line
+    // of text the game slides faster than a glyph's size a game frame paired with the same letter of another word,
+    // or its shadow's, so the frames between drew those letters a few pixels from the rest. When every corner's
     // texcoords moved by the same amount, less than a quarter of the texels the rect spans in each direction (a step
     // across a wrapped tile's period taken inside it), its tiles are placed that much back in the frame before, so the
     // tile processor slides the texture there in the frames between, and a rect that moved is drawn that much nearer
@@ -741,11 +744,56 @@ namespace RT64 {
             return step;
         };
 
+        // A rect's own in the frame before: where both frames drew the same rects in the same order (the same textures
+        // at the same scale, call by call, from the start and from the end), the rect drawn in its place in that
+        // order. One that has its own pairs with it alone, moved or cut, never with a look-alike: a line of text is
+        // the same few glyphs over and over, a glyph's rect is often wider than the space it takes, and the line may
+        // be drawn twice, a pixel apart, for its shadow, so a line the game slides faster than a glyph's size a game
+        // frame paired a glyph with the same letter of another word, or with its shadow, and the frames between drew
+        // those letters a few pixels from where the game put the rest (Mario Golf's save menu as it slides off:
+        // "There is no saved data" drawn "Ther eis nos aved dta"). Unpaired, it is drawn where the game put it, as the
+        // rest of its line is. Where the frames drew a different number of rects, a rect that both the run from the
+        // start and the run from the end reach has two places, one rect apart or more, with the same look in each (a
+        // repeated letter where a glyph came or went): it has no own, and pairs as it did before there were owns.
+        const size_t commonCount = std::min(curRects.size(), prevRects.size());
+        size_t head = 0;
+        while ((head < commonCount) && sameLook(*curRects[head].call, *prevRects[head].call)) {
+            head++;
+        }
+
+        size_t tail = 0;
+        while ((tail < commonCount) && sameLook(*curRects[curRects.size() - 1 - tail].call, *prevRects[prevRects.size() - 1 - tail].call)) {
+            tail++;
+        }
+
+        thread_local std::vector<size_t> curOwn;
+        curOwn.assign(curRects.size(), prevRects.size());
+        for (size_t r = 0; r < head; r++) {
+            curOwn[r] = r;
+        }
+
+        for (size_t t = 0; t < tail; t++) {
+            const size_t c = curRects.size() - 1 - t;
+            const size_t p = prevRects.size() - 1 - t;
+            curOwn[c] = ((c < head) && (c != p)) ? prevRects.size() : p;
+        }
+
         // Every rect that drew the same place pairs first, so one that stayed put never pairs with a look-alike that moved.
         thread_local std::vector<size_t> curFound;
         curFound.assign(curRects.size(), prevRects.size());
         size_t searchStart = 0;
         for (size_t r = 0; r < curRects.size(); r++) {
+            const size_t own = curOwn[r];
+            if (own < prevRects.size()) {
+                if (!prevUsed[own] && sameRect(*curRects[r].call, *prevRects[own].call)) {
+                    curFound[r] = own;
+                    prevUsed[own] = true;
+                    searchStart = own + 1;
+                }
+
+                continue;
+            }
+
             for (size_t i = 0; i < prevRects.size(); i++) {
                 const size_t j = (searchStart + i) % prevRects.size();
                 if (!prevUsed[j] && sameRect(*curRects[r].call, *prevRects[j].call)) {
@@ -763,6 +811,17 @@ namespace RT64 {
             }
 
             const DrawCall &curCall = *curRects[r].call;
+            const size_t own = curOwn[r];
+            if (own < prevRects.size()) {
+                const DrawCall &ownCall = *prevRects[own].call;
+                if (!prevUsed[own] && movedLess(curCall, ownCall) && sameTextures(curCall, ownCall)) {
+                    curFound[r] = own;
+                    prevUsed[own] = true;
+                }
+
+                continue;
+            }
+
             int32_t nearest = INT32_MAX;
             for (size_t j = 0; j < prevRects.size(); j++) {
                 const DrawCall &prevCall = *prevRects[j].call;
@@ -807,7 +866,9 @@ namespace RT64 {
             int32_t nearest = INT32_MAX;
             for (size_t j = 0; j < prevRects.size(); j++) {
                 const DrawCall &prevCall = *prevRects[j].call;
-                if (prevUsed[j] || sameSize(curCall, prevCall) || !sameLook(curCall, prevCall) || !edgesFollow(curRects[r], prevRects[j])) {
+                if (((curOwn[r] < prevRects.size()) && (j != curOwn[r])) || prevUsed[j] || sameSize(curCall, prevCall) || !sameLook(curCall, prevCall) ||
+                    !edgesFollow(curRects[r], prevRects[j]))
+                {
                     continue;
                 }
 
