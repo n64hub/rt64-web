@@ -555,7 +555,12 @@ namespace RT64 {
     // the frame before's in its order that drew the same place with the same textures (its rect, scale and tiles, and
     // each tile's TMEM hash), or, with none, with the nearest that drew the same textures at the same size and scale
     // less than its longer side away each way: a strip as wide as the screen and a few rows high follows a camera that
-    // pitches fast, and a glyph of a font doesn't pair with the same glyph a cell or more away. When every corner's
+    // pitches fast, and a glyph of a font doesn't pair with the same glyph a cell or more away. One that far, farther
+    // than its shorter side, is passed over when one of another size with the same textures lies nearer: the same
+    // textures drawn in several places, each cut by the screen's edge as they slide off it, a frame or two apart (Mario
+    // Golf's save menu, three slots of one wooden strip), take on each other's sizes, and a slot paired with the one
+    // above it, its own cut strip being nearer. That is the rect itself, cut to another size, which the last pass
+    // pairs. When every corner's
     // texcoords moved by the same amount, less than a quarter of the texels the rect spans in each direction (a step
     // across a wrapped tile's period taken inside it), its tiles are placed that much back in the frame before, so the
     // tile processor slides the texture there in the frames between, and a rect that moved is drawn that much nearer
@@ -769,6 +774,22 @@ namespace RT64 {
                 if (distance < nearest) {
                     nearest = distance;
                     curFound[r] = j;
+                }
+            }
+
+            // Farther than its shorter side, a look-alike of another size nearer is the rect itself, cut to that size.
+            if (curFound[r] < prevRects.size()) {
+                const DrawCall &foundCall = *prevRects[curFound[r]].call;
+                const int32_t shorter = std::min(curCall.gameRect.lrx - curCall.gameRect.ulx, curCall.gameRect.lry - curCall.gameRect.uly);
+                if ((abs(foundCall.gameRect.ulx - curCall.gameRect.ulx) >= shorter) || (abs(foundCall.gameRect.uly - curCall.gameRect.uly) >= shorter)) {
+                    for (size_t j = 0; j < prevRects.size(); j++) {
+                        const DrawCall &prevCall = *prevRects[j].call;
+                        const int32_t distance = abs(prevCall.gameRect.ulx - curCall.gameRect.ulx) + abs(prevCall.gameRect.uly - curCall.gameRect.uly);
+                        if ((distance < nearest) && !sameSize(curCall, prevCall) && sameLook(curCall, prevCall)) {
+                            curFound[r] = prevRects.size();
+                            break;
+                        }
+                    }
                 }
             }
 
