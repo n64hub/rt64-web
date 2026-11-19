@@ -595,16 +595,22 @@ namespace RT64 {
     // below in the frames between). That strip's texture slides by its step, however much of the rect's few rows it
     // is. Each of a rect's
     // edges is drawn between where it was and where it is, its texcoords at its upper left, so it meets the strip above
-    // in every frame between and leaves no row of what is behind it showing. A rect that changed texture, or its size
-    // any other way, is drawn where the game put it. Places and sizes are compared as the game drew them, before the
-    // enhancement that moves an edge within a pixel of the scissor's onto it (rect.fixRectLR): it grows or shrinks a
-    // rect by a pixel in the frames its edge passes the scissor's, and a glyph that changed size there paired with its
-    // shadow, the same glyph drawn a pixel aside, so the frames between drew the line a pixel to the side. Last, a strip
-    // still unpaired that the frame before drew nothing of slides with the strip of its panorama it adjoins (below).
-    // A rect's edge that came onto the scissor's from inside it, where the game cuts it as the panorama moves on, is held
-    // there in the frames between, its texels moving with its other edge, as at an edge that stayed: the strip of
-    // Mario Golf's hills under one that has just left the picture over the top as the camera pitches down, drawn between
-    // where its top was and the scissor, showed the clear color's dark blue in the picture's top row.
+    // in every frame between and leaves no row of what is behind it showing. One still unpaired pairs with the nearest,
+    // less than its longer side away, that drew the same textures at another scale with the same texels at its corners,
+    // within a texel: a sprite the game grows or shrinks as it moves it (Mario Golf's Play Modes wheel, each mode's
+    // icon drawn in two strips at a scale of its own as the wheel turns), each of whose edges is drawn between where it
+    // was and where it is, its texture stretched across it as the game stretches it. Left unpaired, its strips slid in
+    // the game frames whose scale stayed and stepped in the rest, off the pace of the wheel. A rect that changed
+    // texture, or its size any other way, is drawn where the game put it. Places and sizes are compared as the game
+    // drew them, before the enhancement that moves an edge within a pixel of the scissor's onto it (rect.fixRectLR): it
+    // grows or shrinks a rect by a pixel in the frames its edge passes the scissor's, and a glyph that changed size
+    // there paired with its shadow, the same glyph drawn a pixel aside, so the frames between drew the line a pixel to
+    // the side. Last, a strip still unpaired that the frame before drew nothing of slides with the strip of its
+    // panorama it adjoins (below). A rect's edge that came onto the scissor's from inside it, where the game cuts it as
+    // the panorama moves on, is held there in the frames between, its texels moving with its other edge, as at an edge
+    // that stayed: the strip of Mario Golf's hills under one that has just left the picture over the top as the camera
+    // pitches down, drawn between where its top was and the scissor, showed the clear color's dark blue in the
+    // picture's top row.
     // Rects that sample no texture are paired among themselves, apart from the textured ones, so a rect of either kind
     // never changes what the other's runs of owns are: one that draws a colour (a combiner of primitive or environment
     // colour alone, or a fill) has the same look as one that draws it with the same combiner, other modes and colours,
@@ -663,9 +669,9 @@ namespace RT64 {
             return (float(a.x) == float(b.x)) && (float(a.y) == float(b.y)) && (float(a.z) == float(b.z)) && (float(a.w) == float(b.w));
         };
 
-        // The same textures at the same scale, whatever the rect's size.
-        auto sameLook = [&](const DrawCall &a, const DrawCall &b) {
-            if ((a.rectDsdx != b.rectDsdx) || (a.rectDtdy != b.rectDtdy) || (a.tileCount != b.tileCount)) {
+        // The same textures, whatever the rect's size and scale.
+        auto sameTiles = [&](const DrawCall &a, const DrawCall &b) {
+            if (a.tileCount != b.tileCount) {
                 return false;
             }
 
@@ -688,6 +694,11 @@ namespace RT64 {
             }
 
             return true;
+        };
+
+        // The same textures at the same scale, whatever the rect's size.
+        auto sameLook = [&](const DrawCall &a, const DrawCall &b) {
+            return (a.rectDsdx == b.rectDsdx) && (a.rectDtdy == b.rectDtdy) && sameTiles(a, b);
         };
 
         auto sameTextures = [&](const DrawCall &a, const DrawCall &b) {
@@ -789,6 +800,27 @@ namespace RT64 {
             const DrawCall &b = *rb.call;
             return (follows(a.gameRect.ulx, a.gameRect.lrx, b.gameRect.ulx, b.gameRect.lrx) || cutAt(ra, rb, false)) &&
                 (follows(a.gameRect.uly, a.gameRect.lry, b.gameRect.uly, b.gameRect.lry) || cutAt(ra, rb, true));
+        };
+
+        // The same texels at its corners, within a texel each way: the least and most texcoord over its vertices.
+        auto sameCorners = [&](const RectCall &a, const RectCall &b) {
+            const float *aTc = &curData.triTcFloats[a.rawVertex * 2];
+            const float *bTc = &prevData.triTcFloats[b.rawVertex * 2];
+            for (uint32_t axis = 0; axis < 2; axis++) {
+                float aMin = aTc[axis], aMax = aTc[axis], bMin = bTc[axis], bMax = bTc[axis];
+                for (uint32_t v = 1; v < 6; v++) {
+                    aMin = std::min(aMin, aTc[v * 2 + axis]);
+                    aMax = std::max(aMax, aTc[v * 2 + axis]);
+                    bMin = std::min(bMin, bTc[v * 2 + axis]);
+                    bMax = std::max(bMax, bTc[v * 2 + axis]);
+                }
+
+                if ((fabsf(aMin - bMin) > 1.0f) || (fabsf(aMax - bMax) > 1.0f)) {
+                    return false;
+                }
+            }
+
+            return true;
         };
 
         // A step in a tile's texels, taken inside its period when it wraps or mirrors.
@@ -962,6 +994,38 @@ namespace RT64 {
             }
         }
 
+        thread_local std::vector<bool> curScaled;
+        curScaled.assign(curRects.size(), false);
+        for (size_t r = 0; (r < curRects.size()) && !untextured; r++) {
+            if (curFound[r] < prevRects.size()) {
+                continue;
+            }
+
+            const DrawCall &curCall = *curRects[r].call;
+            int32_t nearest = INT32_MAX;
+            for (size_t j = 0; j < prevRects.size(); j++) {
+                const DrawCall &prevCall = *prevRects[j].call;
+                const bool sameScale = (curCall.rectDsdx == prevCall.rectDsdx) && (curCall.rectDtdy == prevCall.rectDtdy);
+                if (((curOwn[r] < prevRects.size()) && (j != curOwn[r])) || prevUsed[j] || sameScale || !movedLess(curCall, prevCall) ||
+                    !sameTiles(curCall, prevCall) || !sameCorners(curRects[r], prevRects[j]))
+                {
+                    continue;
+                }
+
+                const int32_t distance = abs(prevCall.gameRect.ulx - curCall.gameRect.ulx) + abs(prevCall.gameRect.uly - curCall.gameRect.uly) +
+                    abs(prevCall.gameRect.lrx - curCall.gameRect.lrx) + abs(prevCall.gameRect.lry - curCall.gameRect.lry);
+                if (distance < nearest) {
+                    nearest = distance;
+                    curFound[r] = j;
+                }
+            }
+
+            if (curFound[r] < prevRects.size()) {
+                prevUsed[curFound[r]] = true;
+                curScaled[r] = true;
+            }
+        }
+
         // By a rect's index, the texcoords its upper left moved by from the frame before when its texture slides by
         // them, for the strip that adjoins it with no pair of its own (below).
         struct RectSlide {
@@ -985,6 +1049,22 @@ namespace RT64 {
             const float *prevTc = &prevData.triTcFloats[prevRects[found].rawVertex * 2];
             const float ds = curTc[0] - prevTc[0];
             const float dt = curTc[1] - prevTc[1];
+            const hlslpp::float4 edgeMoves = hlslpp::float4(float(prevCall.rect.ulx - curCall.rect.ulx), float(prevCall.rect.uly - curCall.rect.uly),
+                float(prevCall.rect.lrx - curCall.rect.lrx), float(prevCall.rect.lry - curCall.rect.lry)) / 4.0f;
+            auto setRectMoves = [&]() {
+                if (workloadMap.rectMoves.size() <= curCall.callIndex) {
+                    workloadMap.rectMoves.resize(curCall.callIndex + 1, hlslpp::float4(0.0f, 0.0f, 0.0f, 0.0f));
+                }
+
+                workloadMap.rectMoves[curCall.callIndex] = edgeMoves;
+            };
+
+            // One drawn at another scale with the same texels at its corners is drawn between there and here, its
+            // texture stretched across it as the game stretches it.
+            if (curScaled[r]) {
+                setRectMoves();
+                continue;
+            }
 
             // A rect that changed size keeps its texels a pixel, so its texcoords moved by its upper left's. Its
             // texcoords follow the rect drawn, so this is the drawn rect's size. One with no texture has none to keep.
