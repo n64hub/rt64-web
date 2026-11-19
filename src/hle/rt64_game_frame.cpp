@@ -592,13 +592,21 @@ namespace RT64 {
     // there in the frames between, its texels moving with its other edge, as at an edge that stayed: the strip of
     // Mario Golf's hills under one that has just left the picture over the top as the camera pitches down, drawn between
     // where its top was and the scissor, showed the clear color's dark blue in the picture's top row.
-    static void matchRectScrolls(const Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &workloadMap, bool &tileInterpolationUsed) {
+    // Rects that sample no texture are paired among themselves, apart from the textured ones, so a rect of either kind
+    // never changes what the other's runs of owns are: one that draws a colour (a combiner of primitive or environment
+    // colour alone, or a fill) has the same look as one that draws it with the same combiner, other modes and colours,
+    // and pairs, as a textured one does, in its place, or with the nearest of its size less than its longer side or 16
+    // pixels away. It is never paired with one of another size, having no texels to say it is the same thing cut. One
+    // that moved is drawn between where it was and where it is, and at the corners the game gave it to a quarter pixel
+    // (the framebuffer renderer): Mario Golf draws a ball far from the camera as a dot of primitive colour two pixels
+    // by one, which held its place for a game frame and then stepped a pixel.
+    static void matchRectScrolls(const Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &workloadMap, bool &tileInterpolationUsed, bool untextured) {
         struct RectCall {
             const DrawCall *call;
             uint32_t rawVertex;
         };
 
-        auto collect = [](const Workload &workload, std::vector<RectCall> &rects) {
+        auto collect = [untextured](const Workload &workload, std::vector<RectCall> &rects) {
             rects.clear();
             uint32_t rawVertex = 0;
             const size_t rawVertexCount = workload.drawData.triTcFloats.size() / 2;
@@ -613,7 +621,8 @@ namespace RT64 {
                     for (uint32_t c = 0; c < proj.gameCallCount; c++) {
                         const DrawCall &call = proj.gameCalls[c].callDesc;
                         const bool oneRect = (call.triangleCount == 2) && ((rawVertex + 6) <= rawVertexCount);
-                        if ((proj.type == Projection::Type::Rectangle) && oneRect && call.textureOn && (call.tileCount > 0) && (call.tileCount <= 8)) {
+                        const bool kind = untextured ? (call.tileCount == 0) : (call.textureOn && (call.tileCount > 0) && (call.tileCount <= 8));
+                        if ((proj.type == Projection::Type::Rectangle) && oneRect && kind) {
                             rects.push_back({ &call, rawVertex });
                         }
 
@@ -636,10 +645,21 @@ namespace RT64 {
             return ((a.gameRect.lrx - a.gameRect.ulx) == (b.gameRect.lrx - b.gameRect.ulx)) && ((a.gameRect.lry - a.gameRect.uly) == (b.gameRect.lry - b.gameRect.uly));
         };
 
+        // The same colours drawn the same way, for a rect that samples no texture.
+        auto sameColor = [](const hlslpp::float4 &a, const hlslpp::float4 &b) {
+            return (float(a.x) == float(b.x)) && (float(a.y) == float(b.y)) && (float(a.z) == float(b.z)) && (float(a.w) == float(b.w));
+        };
+
         // The same textures at the same scale, whatever the rect's size.
         auto sameLook = [&](const DrawCall &a, const DrawCall &b) {
             if ((a.rectDsdx != b.rectDsdx) || (a.rectDtdy != b.rectDtdy) || (a.tileCount != b.tileCount)) {
                 return false;
+            }
+
+            if (untextured) {
+                return (a.colorCombiner.L == b.colorCombiner.L) && (a.colorCombiner.H == b.colorCombiner.H) && (a.otherMode.L == b.otherMode.L) &&
+                    (a.otherMode.H == b.otherMode.H) && (a.fillColor == b.fillColor) && sameColor(a.rdpParams.primColor, b.rdpParams.primColor) &&
+                    sameColor(a.rdpParams.envColor, b.rdpParams.envColor);
             }
 
             for (uint32_t t = 0; t < a.tileCount; t++) {
@@ -665,9 +685,11 @@ namespace RT64 {
             return (a.gameRect.ulx == b.gameRect.ulx) && (a.gameRect.uly == b.gameRect.uly) && sameTextures(a, b);
         };
 
-        // Moved by less than the rect's longer side each way, in quarter pixels.
-        auto movedLess = [](const DrawCall &a, const DrawCall &b) {
-            const int32_t side = std::max(a.gameRect.lrx - a.gameRect.ulx, a.gameRect.lry - a.gameRect.uly);
+        // Moved by less than the rect's longer side each way, in quarter pixels, or, for one with no texture, less than
+        // 16 pixels: a dot of colour has no glyph of a font to be taken for, and Mario Golf's far ball, two pixels by
+        // one, falls 3 to 6 pixels a game frame at the end of a drive.
+        auto movedLess = [untextured](const DrawCall &a, const DrawCall &b) {
+            const int32_t side = std::max(untextured ? (16 * 4) : 0, std::max(a.gameRect.lrx - a.gameRect.ulx, a.gameRect.lry - a.gameRect.uly));
             return (abs(b.gameRect.ulx - a.gameRect.ulx) < side) && (abs(b.gameRect.uly - a.gameRect.uly) < side);
         };
 
@@ -899,7 +921,7 @@ namespace RT64 {
             }
         }
 
-        for (size_t r = 0; r < curRects.size(); r++) {
+        for (size_t r = 0; (r < curRects.size()) && !untextured; r++) {
             if (curFound[r] < prevRects.size()) {
                 continue;
             }
@@ -952,11 +974,11 @@ namespace RT64 {
             const float dt = curTc[1] - prevTc[1];
 
             // A rect that changed size keeps its texels a pixel, so its texcoords moved by its upper left's. Its
-            // texcoords follow the rect drawn, so this is the drawn rect's size.
+            // texcoords follow the rect drawn, so this is the drawn rect's size. One with no texture has none to keep.
             const bool sameDrawnSize = ((curCall.rect.lrx - curCall.rect.ulx) == (prevCall.rect.lrx - prevCall.rect.ulx)) &&
                 ((curCall.rect.lry - curCall.rect.uly) == (prevCall.rect.lry - prevCall.rect.uly));
             bool together = true;
-            for (uint32_t v = 1; (v < 6) && together && sameDrawnSize; v++) {
+            for (uint32_t v = 1; (v < 6) && together && sameDrawnSize && !untextured; v++) {
                 together = (fabsf((curTc[v * 2 + 0] - prevTc[v * 2 + 0]) - ds) < 1.0e-3f) && (fabsf((curTc[v * 2 + 1] - prevTc[v * 2 + 1]) - dt) < 1.0e-3f);
             }
 
@@ -1116,7 +1138,7 @@ namespace RT64 {
 
         // A strip that slides so passes it on to the next unpaired one: at a faster pitch the strip under the new one
         // went from cut to whole, and paired with nothing either.
-        bool passedOn = true;
+        bool passedOn = !untextured;
         while (passedOn) {
             passedOn = false;
             for (size_t r = 0; r < curRects.size(); r++) {
@@ -1384,7 +1406,8 @@ namespace RT64 {
         // match() returns.
 #if RT64_INTERPOLATE_RECT_SCROLLS
         for (const std::pair<uint32_t, uint32_t> &drawnPair : drawnPairs) {
-            matchRectScrolls(workloadQueue.workloads[drawnPair.first], workloadQueue.workloads[drawnPair.second], frameMap.workloads[drawnPair.first], tileInterpolationUsed);
+            matchRectScrolls(workloadQueue.workloads[drawnPair.first], workloadQueue.workloads[drawnPair.second], frameMap.workloads[drawnPair.first], tileInterpolationUsed, false);
+            matchRectScrolls(workloadQueue.workloads[drawnPair.first], workloadQueue.workloads[drawnPair.second], frameMap.workloads[drawnPair.first], tileInterpolationUsed, true);
         }
 #endif
     }

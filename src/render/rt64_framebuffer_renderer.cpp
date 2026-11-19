@@ -1812,9 +1812,22 @@ namespace RT64 {
 #                       if RT64_INTERPOLATE_RECT_SCROLLS
                             // A rect the game frame before drew elsewhere with the same textures has each edge drawn between
                             // there and here: its center moves by the mean of its edges' moves, and its size by their
-                            // difference. Here, after the lines that place it, which games' own RT64 changes rewrite.
+                            // difference. Here, after the lines that place it, which games' own RT64 changes rewrite. One
+                            // that samples no texture is drawn at the corners the game gave it, to a quarter pixel, and not
+                            // on the whole pixels a rect is placed on (convertViewportRect), so a dot of colour the game
+                            // moves by fractions of a pixel (Mario Golf's ball far from the camera) moves on every frame,
+                            // not a pixel at a time; it has no texels to keep on the pixels.
                             if ((p.rectMoves != nullptr) && (call.callDesc.callIndex < p.rectMoves->size())) {
-                                const hlslpp::float4 edges = (*p.rectMoves)[call.callDesc.callIndex] * (1.0f - p.curFrameWeight);
+                                const hlslpp::float4 move = (*p.rectMoves)[call.callDesc.callIndex];
+                                hlslpp::float4 edges = move * (1.0f - p.curFrameWeight);
+                                const FixedRect &rect = call.callDesc.rect;
+                                const uint32_t cycleType = call.callDesc.otherMode.cycleType();
+                                const bool moved = (float(move.x) != 0.0f) || (float(move.y) != 0.0f) || (float(move.z) != 0.0f) || (float(move.w) != 0.0f);
+                                if (moved && (call.callDesc.tileCount == 0) && (cycleType != G_CYC_FILL) && (cycleType != G_CYC_COPY)) {
+                                    edges += hlslpp::float4(float(rect.ulx) / 4.0f - float(rect.left(true)), float(rect.uly) / 4.0f - float(rect.top(true)),
+                                        float(rect.lrx) / 4.0f - float(rect.right(true)), float(rect.lry) / 4.0f - float(rect.bottom(true)));
+                                }
+
                                 const float scaleX = invRatioScale * p.resolutionScale.x;
                                 const float scaleY = p.resolutionScale.y;
                                 triangles.screenOffset.x += ((float(edges.x) + float(edges.z)) * 0.5f * scaleX) / halfViewportSize.x;
