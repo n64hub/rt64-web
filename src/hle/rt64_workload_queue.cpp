@@ -61,6 +61,7 @@ namespace RT64 {
         lastFrameShownFbAddress = 0;
         frameBeforeShownFbAddress = 0;
         lastFrameCut = false;
+        lastFrameEndedNext = false;
         heldWorkloadId = 0;
 #   endif
     }
@@ -199,6 +200,20 @@ namespace RT64 {
                         waitedFor = true;
                     }
                 }
+
+                // Once the last frame ended only at this one's first workload (or here), its present wasn't queued before
+                // the next frame began, and a frame ends where it has drawn a framebuffer the VI shows other than the one
+                // the frame before drew, in as many workloads that draw as the frame before had. Held for the next
+                // frame's first workload, each frame was drawn a game frame late: Turok 2, whose three framebuffers the
+                // VI shows two frames behind the one the game draws, ended every frame there, and its view showed a
+                // turn on the stick 100-170 ms after the game had turned it. A frame with more workloads than the one
+                // before is cut there and its rest drawn as the frame after it, as at a wait (lastFrameCut).
+                if (lastFrameEndedNext && workload.drawsShown && (lastFrameDrawnCount > 0) &&
+                    (shownFbAddress != lastFrameShownFbAddress) && (drawnCount >= lastFrameDrawnCount))
+                {
+                    end = GameFrameEnd::Drawn;
+                    return count;
+                }
             }
 
             waitedFor = waitedFor || (workload.workloadId <= waitedWorkloadId);
@@ -248,7 +263,7 @@ namespace RT64 {
     // it draws to a framebuffer the VI shows, and which, or is an offscreen pass, and each framebuffer it draws to as
     // address/width. Called with cursorMutex held.
     void WorkloadQueue::logGameFrame(int startCursor, uint32_t count, GameFrameEnd end) const {
-        static const char *EndNames[] = { "present", "next", "wait", "held", "full", "paused" };
+        static const char *EndNames[] = { "present", "next", "wait", "held", "full", "paused", "drawn" };
         const long long ms = logTime();
         uint32_t drawnCount = 0;
         for (uint32_t i = 0; i < count; i++) {
@@ -1269,7 +1284,9 @@ namespace RT64 {
                         lastFrameShownFbAddress = shownFbAddress;
                     }
 
-                    lastFrameCut = ((frameEnd == GameFrameEnd::Wait) || (frameEnd == GameFrameEnd::HeldLimit) || (frameEnd == GameFrameEnd::QueueFull));
+                    lastFrameCut = ((frameEnd == GameFrameEnd::Wait) || (frameEnd == GameFrameEnd::HeldLimit) || (frameEnd == GameFrameEnd::QueueFull) ||
+                        (frameEnd == GameFrameEnd::Drawn));
+                    lastFrameEndedNext = (frameEnd == GameFrameEnd::NextFrame) || (frameEnd == GameFrameEnd::Drawn);
 #               endif
                     processCursor = threadCursor;
                     threadCursor = (threadCursor + frameWorkloadCount) % workloads.size();

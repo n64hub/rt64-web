@@ -62,7 +62,8 @@ namespace RT64 {
         Wait,
         HeldLimit,
         QueueFull,
-        Paused
+        Paused,
+        Drawn
     };
 #endif
 
@@ -146,6 +147,11 @@ namespace RT64 {
         uint32_t lastFrameShownFbAddress = 0;
         uint32_t frameBeforeShownFbAddress = 0;
         bool lastFrameCut = false;
+
+        // Whether the last game frame ended only at the next one's first workload, or as soon as it was drawn
+        // (GameFrameEnd::Drawn): a game whose present of a frame comes after its next frame begins, so a frame ends
+        // once it has drawn the framebuffer it shows in as many workloads as the frame before (endedGameFrame()).
+        bool lastFrameEndedNext = false;
         mutable uint64_t heldWorkloadId = 0;
         mutable std::chrono::steady_clock::time_point heldSince;
 
