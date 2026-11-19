@@ -9,6 +9,13 @@
 //
 // - <dir>/frames.bin: every frame presented, the frames interpolated between the game's included, each as its 40-byte
 //   header (FrameHeader) and its pixels, 8-bit RGB, rows top down, the picture box-filtered to at most MaxWidth wide.
+//   A desktop build writes the pixels compressed (writeLoop()): the header's magic is MagicCompressed, and 8 more bytes
+//   follow it (CompressedHeader), the compressed size and whether the pixels are less the previous frame's, then that
+//   many bytes of zstd. A reader still reads a frame without the ones before it from the frame written whole at most
+//   KeyEvery frames before it, each header saying where the next one is. A 640x360 frame is 690 KB raw, 40 MB a second at
+//   60, and a dump of a whole plan was tens of GB a window: compressed it is about a third of that (Mario Golf's,
+//   3.4-3.7 times smaller less the previous frame, 1.8-2.1 alone), at 1-3 ms a frame on the writer's thread. A
+//   browser's build writes them raw (Magic), so its wasm carries no compressor.
 //   The picture is the box of the frame's color target the VI draws from (VIRenderer::render()'s videoResolution, from
 //   its top left corner), not the whole target, which can be larger: the targets of the frames drawn between the
 //   game's are kept at the largest size drawn (a 1692x960 target for a 1280x720 picture), and one kept from a larger
@@ -45,8 +52,12 @@
 // swapChainCreated() and the shared resources' swapChainRate(), and everything else is here: a game's own changes to
 // RT64 meet its lines in as few places as can be.
 //
-// Frames go to a thread of their own, a few in hand at most: one that finds the queue full is dropped and counted in
-// the next header's dropped field, so a slow disk shows as a gap the tool knows, never as a slower game.
+// Frames go to a thread of their own, about a second's in hand at most (MaxQueued, 44 MB of 640x360 frames: a dump of
+// Mario Golf's lost 22 frames at once to a stall of the writer, with 8 in hand, in one of three windows that dumped
+// the same scene): one that finds the queue full is dropped and counted in
+// the next header's dropped field, so a slow disk shows as a gap the tool knows, never as a slower game. The writer
+// stops writing frames, and says so once, when its disk has less than MinFreeBytes free: a dump run by hand, with no
+// tool watching its size, never fills the disk under the game and whatever else uses it.
 
 #include <algorithm>
 #include <atomic>
@@ -69,12 +80,21 @@
 #include "render/rt64_vi_renderer.h"
 
 namespace RT64 {
+    // rt64_frame_dump.cpp: src as zstd at level into dst, sized to fit, a context kept in context between calls. False,
+    // and why in error, where it fails. The one part of the dump not in this header: zstd's header is RT64's own, and
+    // programs include this one without it (RecompFrontend's renderer).
+    bool frameDumpCompress(void *&context, const std::vector<uint8_t> &src, std::vector<uint8_t> &dst, int level, const char *&error);
+
     struct FrameDump {
-        static constexpr uint32_t Magic = 0x44465452; // "RTFD"
+        static constexpr uint32_t Magic = 0x44465452; // "RTFD": the pixels follow raw.
+        static constexpr uint32_t MagicCompressed = 0x5A465452; // "RTFZ": a CompressedHeader and zstd follow.
+        static constexpr uint32_t KeyEvery = 30; // A frame written whole at least this often.
+        static constexpr int CompressionLevel = 3;
+        static constexpr uint64_t MinFreeBytes = 10ULL << 30;
         static constexpr uint32_t MaxWidth = 640;
         static constexpr int BandsPerView = 20;
         static constexpr int Bands = BandsPerView * 3;
-        static constexpr size_t MaxQueued = 8;
+        static constexpr size_t MaxQueued = 64;
 
         struct FrameHeader {
             uint32_t magic;
@@ -85,6 +105,11 @@ namespace RT64 {
             uint32_t dropped; // Frames dropped since the last one written: the writer fell behind.
             uint64_t presentId;
             uint64_t timeMs; // Milliseconds since 1970, RT64_FRAME_LOG's clock.
+        };
+
+        struct CompressedHeader {
+            uint32_t bytes; // The zstd's size, which follows.
+            uint32_t previous; // 1: what it decompresses to is each byte of the pixels less the previous frame's, mod 256.
         };
 
         struct Frame {
@@ -104,6 +129,13 @@ namespace RT64 {
         std::condition_variable condition;
         std::deque<Frame> queue;
         std::thread writer;
+        bool outOfRoom = false; // Writer thread's, as are the rest.
+        uint64_t framesWritten = 0;
+        uint32_t sinceKey = 0;
+        std::vector<uint8_t> previousRgb;
+        std::vector<uint8_t> difference;
+        std::vector<uint8_t> compressed;
+        void *compressContext = nullptr;
         uint32_t droppedSinceLast = 0;
         uint32_t bands[Bands] = {};
         const void *bandsWorkload = nullptr;
@@ -337,10 +369,75 @@ namespace RT64 {
                     queue.pop_front();
                 }
 
+                if (!roomToWrite()) {
+                    continue;
+                }
+
+#           if defined(__EMSCRIPTEN__)
                 fwrite(&frame.header, sizeof(frame.header), 1, framesFile);
                 fwrite(frame.rgb.data(), 1, frame.rgb.size(), framesFile);
+#           else
+                writeCompressed(frame);
+#           endif
                 fflush(framesFile);
             }
         }
+
+        // Whether the dump's disk has room: read every 64 frames, and once it hasn't, never again. Writer thread.
+        bool roomToWrite() {
+            if (outOfRoom) {
+                return false;
+            }
+
+            if ((framesWritten++ % 64) == 0) {
+                std::error_code error;
+                const std::filesystem::space_info space = std::filesystem::space(std::filesystem::path(dir), error);
+                if (!error && (space.available < MinFreeBytes)) {
+                    fprintf(stderr, "RT64_FRAME_DUMP: stopped writing frames, %s has under %llu GB free\n", dir.c_str(),
+                        (unsigned long long)(MinFreeBytes >> 30));
+                    outOfRoom = true;
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+#   if !defined(__EMSCRIPTEN__)
+        // A frame as MagicCompressed's header and zstd: whole, at the dump's first frame, a size change or KeyEvery
+        // frames since the last whole one, and otherwise each byte less the previous frame's, which leaves the parts
+        // that didn't change zeros (most of a frame between two of the game's, and every still part of a scene).
+        // Writer thread.
+        void writeCompressed(Frame &frame) {
+            const bool previous = (sinceKey < KeyEvery) && (previousRgb.size() == frame.rgb.size());
+            const std::vector<uint8_t> *source = &frame.rgb;
+            if (previous) {
+                difference.resize(frame.rgb.size());
+                for (size_t i = 0; i < frame.rgb.size(); i++) {
+                    difference[i] = uint8_t(frame.rgb[i] - previousRgb[i]);
+                }
+
+                source = &difference;
+                sinceKey++;
+            }
+            else {
+                sinceKey = 1;
+            }
+
+            const char *error = nullptr;
+            if (!frameDumpCompress(compressContext, *source, compressed, CompressionLevel, error)) {
+                fprintf(stderr, "RT64_FRAME_DUMP: a frame didn't compress: %s\n", error);
+                return;
+            }
+
+            FrameHeader header = frame.header;
+            header.magic = MagicCompressed;
+            const CompressedHeader extra = { uint32_t(compressed.size()), previous ? 1U : 0U };
+            fwrite(&header, sizeof(header), 1, framesFile);
+            fwrite(&extra, sizeof(extra), 1, framesFile);
+            fwrite(compressed.data(), 1, compressed.size(), framesFile);
+            previousRgb.swap(frame.rgb);
+        }
+#   endif
     };
 };

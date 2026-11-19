@@ -443,6 +443,7 @@ set (SOURCES
     "${PROJECT_SOURCE_DIR}/src/hle/rt64_color_converter.cpp"
     "${PROJECT_SOURCE_DIR}/src/hle/rt64_command_warning.cpp"
     "${PROJECT_SOURCE_DIR}/src/hle/rt64_draw_call.cpp"
+    "${PROJECT_SOURCE_DIR}/src/hle/rt64_frame_dump.cpp"
     "${PROJECT_SOURCE_DIR}/src/hle/rt64_framebuffer.cpp"
     "${PROJECT_SOURCE_DIR}/src/hle/rt64_framebuffer_changes.cpp"
     "${PROJECT_SOURCE_DIR}/src/hle/rt64_framebuffer_manager.cpp"
