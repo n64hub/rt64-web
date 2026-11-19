@@ -588,6 +588,10 @@ namespace RT64 {
     // rect by a pixel in the frames its edge passes the scissor's, and a glyph that changed size there paired with its
     // shadow, the same glyph drawn a pixel aside, so the frames between drew the line a pixel to the side. Last, a strip
     // still unpaired that the frame before drew nothing of slides with the strip of its panorama it adjoins (below).
+    // A rect's edge that came onto the scissor's from inside it, where the game cuts it as the panorama moves on, is held
+    // there in the frames between, its texels moving with its other edge, as at an edge that stayed: the strip of
+    // Mario Golf's hills under one that has just left the picture over the top as the camera pitches down, drawn between
+    // where its top was and the scissor, showed the clear color's dark blue in the picture's top row.
     static void matchRectScrolls(const Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &workloadMap, bool &tileInterpolationUsed) {
         struct RectCall {
             const DrawCall *call;
@@ -667,11 +671,36 @@ namespace RT64 {
             return (abs(b.gameRect.ulx - a.gameRect.ulx) < side) && (abs(b.gameRect.uly - a.gameRect.uly) < side);
         };
 
+        // The edge the game holds one way, of a rect (a) and the one it pairs with in the frame before (b): 1 its upper
+        // left, 2 its lower right, 0 neither. One that stayed while the other moved, or, with both moved, one that came
+        // onto the scissor's from inside it, where the game cuts the rect: the strip of a panorama under one that left
+        // the picture over the top, whole in the frame before and cut at the top in this one (Mario Golf's hills as
+        // the camera pitches down).
+        auto heldEdge = [](const DrawCall &ca, const DrawCall &cb, bool vertical) {
+            const int32_t aUl = vertical ? ca.gameRect.uly : ca.gameRect.ulx;
+            const int32_t aLr = vertical ? ca.gameRect.lry : ca.gameRect.lrx;
+            const int32_t bUl = vertical ? cb.gameRect.uly : cb.gameRect.ulx;
+            const int32_t bLr = vertical ? cb.gameRect.lry : cb.gameRect.lrx;
+            const int32_t ulMove = bUl - aUl;
+            const int32_t lrMove = bLr - aLr;
+            if ((ulMove == 0) != (lrMove == 0)) {
+                return (ulMove == 0) ? 1 : 2;
+            }
+
+            if (ulMove == 0) {
+                return 0;
+            }
+
+            const bool ulOnto = (aUl <= (vertical ? ca.scissorRect.uly : ca.scissorRect.ulx)) && (ulMove > 0);
+            const bool lrOnto = (aLr >= (vertical ? ca.scissorRect.lry : ca.scissorRect.lrx)) && (lrMove < 0);
+            return (ulOnto == lrOnto) ? 0 : (ulOnto ? 1 : 2);
+        };
+
         // A rect the game cuts at an edge it holds (a strip of a panorama that crosses the top of the picture, held at
-        // the scissor as the panorama moves on under it): one edge stayed and the other moved less than the rect's
-        // longer side, and its texels moved with that edge, the texcoord at the held edge stepping by what it moved
-        // (where the texture's texel 0 falls, in pixels, moved by as much as the edge, within a quarter pixel). Its
-        // texture slides by that step, however large a part of the few texels the rect spans it is.
+        // the scissor as the panorama moves on under it): that edge held (heldEdge) and the other moved less than the
+        // rect's longer side, and its texels moved with that edge, the texcoord at the held edge stepping by what it
+        // moved (where the texture's texel 0 falls, in pixels, moved by as much as the edge, within a quarter pixel).
+        // Its texture slides by that step, however large a part of the few texels the rect spans it is.
         auto cutAt = [&](const RectCall &a, const RectCall &b, bool vertical) {
             const DrawCall &ca = *a.call;
             const DrawCall &cb = *b.call;
@@ -679,10 +708,9 @@ namespace RT64 {
             const int32_t aLr = vertical ? ca.gameRect.lry : ca.gameRect.lrx;
             const int32_t bUl = vertical ? cb.gameRect.uly : cb.gameRect.ulx;
             const int32_t bLr = vertical ? cb.gameRect.lry : cb.gameRect.lrx;
-            const int32_t ulMove = bUl - aUl;
-            const int32_t lrMove = bLr - aLr;
-            const int32_t edgeMove = (ulMove == 0) ? lrMove : ulMove;
-            if (((ulMove == 0) == (lrMove == 0)) || (abs(edgeMove) >= std::max(aLr - aUl, bLr - bUl))) {
+            const int held = heldEdge(ca, cb, vertical);
+            const int32_t edgeMove = (held == 1) ? (bLr - aLr) : (bUl - aUl);
+            if ((held == 0) || (abs(edgeMove) >= std::max(aLr - aUl, bLr - bUl))) {
                 return false;
             }
 
@@ -941,6 +969,8 @@ namespace RT64 {
             const float spanT = (float(curCall.rect.lry - curCall.rect.uly) / 4.0f) * (fabsf(float(curCall.rectDtdy)) / 1024.0f);
             const bool cutS = cutAt(curRect, prevRects[found], false);
             const bool cutT = cutAt(curRect, prevRects[found], true);
+            const int heldS = cutS ? heldEdge(curCall, prevCall, false) : 0;
+            const int heldT = cutT ? heldEdge(curCall, prevCall, true) : 0;
             float stepS[8];
             float stepT[8];
             bool scrolled = false;
@@ -967,8 +997,12 @@ namespace RT64 {
                     workloadMap.rectMoves.resize(curCall.callIndex + 1, hlslpp::float4(0.0f, 0.0f, 0.0f, 0.0f));
                 }
 
-                workloadMap.rectMoves[curCall.callIndex] = hlslpp::float4(float(prevCall.rect.ulx - curCall.rect.ulx), float(prevCall.rect.uly - curCall.rect.uly),
-                    float(prevCall.rect.lrx - curCall.rect.lrx), float(prevCall.rect.lry - curCall.rect.lry)) / 4.0f;
+                // An edge the game holds where it cuts the rect stays there in the frames between: one that came onto
+                // the scissor's left the strip beyond it no rect in this frame, and drawn between where it was and the
+                // scissor it showed a row of what lies behind (the clear color's sky, over Mario Golf's hills).
+                workloadMap.rectMoves[curCall.callIndex] = hlslpp::float4(
+                    (heldS == 1) ? 0.0f : float(prevCall.rect.ulx - curCall.rect.ulx), (heldT == 1) ? 0.0f : float(prevCall.rect.uly - curCall.rect.uly),
+                    (heldS == 2) ? 0.0f : float(prevCall.rect.lrx - curCall.rect.lrx), (heldT == 2) ? 0.0f : float(prevCall.rect.lry - curCall.rect.lry)) / 4.0f;
             }
 
             // A rect cut at an edge it holds that changed size is drawn wider or narrower in the frames between, its
@@ -981,22 +1015,25 @@ namespace RT64 {
             // pixels, the drawn size W moved by dW, the upper left edge by dU and the moving edge by dM; a texcoord t
             // at the upper left and a scale of a texcoords a pixel give the frame before shifts * (W + dW) / W and its
             // corners 4 * shifts * (t * dW / W + (dM - dU) * a) further on. It takes the place of the step slide on
-            // that axis, which it contains.
+            // that axis, which it contains. An edge held where it came onto the scissor stays there (above), so the
+            // rect's size changes between by its other edge's move, and its texels move with that edge.
             auto cutResize = [&](bool vertical, float &scale, float &corner) {
                 const bool cut = vertical ? cutT : cutS;
+                const int held = vertical ? heldT : heldS;
                 const int32_t curUl = vertical ? curCall.rect.uly : curCall.rect.ulx;
                 const int32_t curLr = vertical ? curCall.rect.lry : curCall.rect.lrx;
                 const int32_t prevUl = vertical ? prevCall.rect.uly : prevCall.rect.ulx;
                 const int32_t prevLr = vertical ? prevCall.rect.lry : prevCall.rect.lrx;
-                if (!cut || (curLr <= curUl) || ((prevLr - prevUl) == (curLr - curUl))) {
+                const int32_t ulMove = (held == 1) ? 0 : (prevUl - curUl);
+                const int32_t lrMove = (held == 2) ? 0 : (prevLr - curLr);
+                if (!cut || (curLr <= curUl) || (ulMove == lrMove)) {
                     return false;
                 }
 
-                const bool ulMoved = vertical ? (prevCall.gameRect.uly != curCall.gameRect.uly) : (prevCall.gameRect.ulx != curCall.gameRect.ulx);
                 const float width = float(curLr - curUl) / 4.0f;
-                const float dU = float(prevUl - curUl) / 4.0f;
-                const float dW = float((prevLr - prevUl) - (curLr - curUl)) / 4.0f;
-                const float dM = ulMoved ? dU : (float(prevLr - curLr) / 4.0f);
+                const float dU = float(ulMove) / 4.0f;
+                const float dW = float(lrMove - ulMove) / 4.0f;
+                const float dM = (held == 1) ? (float(lrMove) / 4.0f) : dU;
                 const float perPixel = float(vertical ? curCall.rectDtdy : curCall.rectDsdx) / 1024.0f;
                 const float texcoord = curTc[vertical ? 1 : 0];
                 scale = (width + dW) / width;
