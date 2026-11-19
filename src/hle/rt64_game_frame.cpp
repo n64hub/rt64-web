@@ -561,9 +561,10 @@ namespace RT64 {
     // Golf's save menu, three slots of one wooden strip), take on each other's sizes, and a slot paired with the one
     // above it, its own cut strip being nearer. That is the rect itself, cut to another size, which the last pass
     // pairs. A rect drawn in the same place in both frames' order of rects, the frames having drawn the same ones in
-    // the same order before and after it, pairs with that one alone, in every pass, or with none: a glyph of a line
-    // of text the game slides faster than a glyph's size a game frame paired with the same letter of another word,
-    // or its shadow's, so the frames between drew those letters a few pixels from the rest. When every corner's
+    // the same order before and after it, pairs with that one alone, in every pass, or with none (but by place first
+    // when another rect now stands in that one's place with its look, the same things drawn in another order): a
+    // glyph of a line of text the game slides faster than a glyph's size a game frame paired with the same letter of
+    // another word, or its shadow's, so the frames between drew those letters a few pixels from the rest. When every corner's
     // texcoords moved by the same amount, less than a quarter of the texels the rect spans in each direction (a step
     // across a wrapped tile's period taken inside it), its tiles are placed that much back in the frame before, so the
     // tile processor slides the texture there in the frames between, and a rect that moved is drawn that much nearer
@@ -785,13 +786,25 @@ namespace RT64 {
         for (size_t r = 0; r < curRects.size(); r++) {
             const size_t own = curOwn[r];
             if (own < prevRects.size()) {
-                if (!prevUsed[own] && sameRect(*curRects[r].call, *prevRects[own].call)) {
+                const DrawCall &ownCall = *prevRects[own].call;
+                if (!prevUsed[own] && sameRect(*curRects[r].call, ownCall)) {
                     curFound[r] = own;
                     prevUsed[own] = true;
                     searchStart = own + 1;
+                    continue;
                 }
 
-                continue;
+                // Its own moved, unless another rect of this frame stands in its place with its look: then the frames
+                // drew the same things in the same places in another order (two sprites swapped in the list), and it
+                // pairs by place, as one with no own does.
+                bool ownStayed = false;
+                for (size_t c = 0; (c < curRects.size()) && !ownStayed; c++) {
+                    ownStayed = (c != r) && sameRect(*curRects[c].call, ownCall);
+                }
+
+                if (!ownStayed) {
+                    continue;
+                }
             }
 
             for (size_t i = 0; i < prevRects.size(); i++) {
