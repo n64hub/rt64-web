@@ -732,6 +732,32 @@ namespace RT64 {
             return (abs(b.gameRect.ulx - a.gameRect.ulx) < side) && (abs(b.gameRect.uly - a.gameRect.uly) < side);
         };
 
+        // Farther than that, less than four times its longer side each way, a rect pairs with one of the frame before
+        // that drew the same textures at the same size and scale when it is the only rect of each frame with that look:
+        // with no look-alike to be taken for, it is the same thing however fast the game moves it, and four of its sides
+        // still leave out a jump to another place on the screen. Mario Golf's pin flag in the sky, 8 by 16 pixels,
+        // which a fast turn of the view moves 22 to 26 pixels a game frame, was left unpaired, held still in the frames
+        // between and stepped once a game frame against the course turning behind it.
+        auto onlyOneFar = [&](const RectCall &ra, size_t j) {
+            const DrawCall &a = *ra.call;
+            const DrawCall &b = *prevRects[j].call;
+            const int32_t side = std::max(a.gameRect.lrx - a.gameRect.ulx, a.gameRect.lry - a.gameRect.uly) * 4;
+            if (untextured || (abs(b.gameRect.ulx - a.gameRect.ulx) >= side) || (abs(b.gameRect.uly - a.gameRect.uly) >= side) || !sameTextures(a, b)) {
+                return false;
+            }
+            for (size_t k = 0; k < prevRects.size(); k++) {
+                if ((k != j) && sameLook(a, *prevRects[k].call)) {
+                    return false;
+                }
+            }
+            for (const RectCall &c : curRects) {
+                if ((&c != &ra) && sameLook(*c.call, b)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
         // The edge the game holds one way, of a rect (a) and the one it pairs with in the frame before (b): 1 its upper
         // left, 2 its lower right, 0 neither. One that stayed while the other moved, or, with both moved, one that came
         // onto the scissor's from inside it, where the game cuts the rect: the strip of a panorama under one that left
@@ -938,7 +964,7 @@ namespace RT64 {
             const size_t own = curOwn[r];
             if (own < prevRects.size()) {
                 const DrawCall &ownCall = *prevRects[own].call;
-                if (!prevUsed[own] && movedLess(curCall, ownCall) && sameTextures(curCall, ownCall)) {
+                if (!prevUsed[own] && ((movedLess(curCall, ownCall) && sameTextures(curCall, ownCall)) || onlyOneFar(curRects[r], own))) {
                     curFound[r] = own;
                     prevUsed[own] = true;
                 }
@@ -956,6 +982,13 @@ namespace RT64 {
                 const int32_t distance = abs(prevCall.gameRect.ulx - curCall.gameRect.ulx) + abs(prevCall.gameRect.uly - curCall.gameRect.uly);
                 if (distance < nearest) {
                     nearest = distance;
+                    curFound[r] = j;
+                }
+            }
+
+            // None near: the one look-alike of a rect no other shares, farther (onlyOneFar).
+            for (size_t j = 0; (j < prevRects.size()) && (curFound[r] == prevRects.size()); j++) {
+                if (!prevUsed[j] && onlyOneFar(curRects[r], j)) {
                     curFound[r] = j;
                 }
             }
