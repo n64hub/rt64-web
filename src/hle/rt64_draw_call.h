@@ -96,6 +96,9 @@ namespace RT64 {
         uint32_t loadIndex;
         uint32_t loadCount;
         uint8_t rectAspect;
+
+        // A texrect drawn at its quarter-pixel corners (RT64_SUBPIXEL_TEXRECTS): set by every rect.
+        uint8_t rectSubpixel;
         uint8_t scissorMode;
         uint8_t textureOn;
         uint8_t textureTile;

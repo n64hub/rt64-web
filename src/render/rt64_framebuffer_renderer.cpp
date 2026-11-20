@@ -1809,6 +1809,24 @@ namespace RT64 {
                             triangles.screenScale = { viewportRect.width / framebuffer.viewport.width, viewportRect.height / framebuffer.viewport.height };
                             triangles.screenOffset.x = halfPixelOffset.x + ((viewportRect.x + viewportRect.width / 2.0f) - halfViewportSize.x) / halfViewportSize.x;
                             triangles.screenOffset.y = halfPixelOffset.y + (halfViewportSize.y - (viewportRect.y + viewportRect.height / 2.0f)) / halfViewportSize.y;
+#                       if RT64_SUBPIXEL_TEXRECTS
+                            // A texrect drawn at the corners the game gave it, to a quarter pixel, not on the whole pixels
+                            // they round up to (convertViewportRect): its texcoords span that size from its top
+                            // (RDP::drawRect), so its texture moves with it by fractions of a pixel.
+                            if (call.callDesc.rectSubpixel) {
+                                const FixedRect &rect = call.callDesc.rect;
+                                const float edgeL = float(rect.ulx) / 4.0f - float(rect.left(true));
+                                const float edgeT = float(rect.uly) / 4.0f - float(rect.top(true));
+                                const float edgeR = float(rect.lrx) / 4.0f - float(rect.right(true));
+                                const float edgeB = float(rect.lry) / 4.0f - float(rect.bottom(true));
+                                const float scaleX = invRatioScale * p.resolutionScale.x;
+                                const float scaleY = p.resolutionScale.y;
+                                triangles.screenOffset.x += ((edgeL + edgeR) * 0.5f * scaleX) / halfViewportSize.x;
+                                triangles.screenOffset.y -= ((edgeT + edgeB) * 0.5f * scaleY) / halfViewportSize.y;
+                                triangles.screenScale.x += ((edgeR - edgeL) * scaleX) / framebuffer.viewport.width;
+                                triangles.screenScale.y += ((edgeB - edgeT) * scaleY) / framebuffer.viewport.height;
+                            }
+#                       endif
 #                       if RT64_INTERPOLATE_RECT_SCROLLS
                             // A rect the game frame before drew elsewhere with the same textures has each edge drawn between
                             // there and here: its center moves by the mean of its edges' moves, and its size by their
