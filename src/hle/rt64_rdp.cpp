@@ -1382,18 +1382,6 @@ namespace RT64 {
         float v1 = ult / 32.0f + vFractionOffset;
         float u2 = lrs / 32.0f;
         float v2 = lrt / 32.0f + vFractionOffset;
-#   if RT64_SUBPIXEL_TEXRECTS
-        if (drawCall.rectSubpixel) {
-            // Drawn at its quarter-pixel corners, its texture spans its own size from its top, not the whole pixels it
-            // rounds out to, and without the row added above for a top inside a pixel, which is for the whole pixel the
-            // rect would start on.
-            const int32_t subWidth = drawRect.lrx - drawRect.ulx;
-            const int32_t subHeight = drawRect.lry - drawRect.uly;
-            v1 = ult / 32.0f;
-            u2 = (((uls << 7) + dsdx * (flip ? subHeight : subWidth)) >> 7) / 32.0f;
-            v2 = (((ult << 7) + dtdy * (flip ? subWidth : subHeight)) >> 7) / 32.0f;
-        }
-#   endif
         triTcFloats.emplace_back(u1);
         triTcFloats.emplace_back(v1);
         triTcFloats.emplace_back(flip ? u1 : u2);
@@ -1407,6 +1395,24 @@ namespace RT64 {
         triTcFloats.emplace_back(flip ? u2 : u1);
         triTcFloats.emplace_back(flip ? v1 : v2);
         drawCall.triangleCount += 2;
+#   if RT64_SUBPIXEL_TEXRECTS
+        if (drawCall.rectSubpixel) {
+            // Drawn at its quarter-pixel corners, its texture spans its own size from its top, not the whole pixels it
+            // rounds out to, and without a row added for a top inside a pixel, which is for the whole pixel the rect
+            // would start on. Its two triangles' texcoords, just added, are written again with them.
+            const int32_t subWidth = drawRect.lrx - drawRect.ulx;
+            const int32_t subHeight = drawRect.lry - drawRect.uly;
+            v1 = ult / 32.0f;
+            u2 = (((uls << 7) + dsdx * (flip ? subHeight : subWidth)) >> 7) / 32.0f;
+            v2 = (((ult << 7) + dtdy * (flip ? subWidth : subHeight)) >> 7) / 32.0f;
+            const float subTcFloats[] = {
+                u1, v1, flip ? u1 : u2, flip ? v2 : v1, flip ? u2 : u1, flip ? v1 : v2,
+                u2, v2, flip ? u1 : u2, flip ? v2 : v1, flip ? u2 : u1, flip ? v1 : v2
+            };
+
+            std::copy(subTcFloats, subTcFloats + std::size(subTcFloats), triTcFloats.end() - std::size(subTcFloats));
+        }
+#   endif
 
         // Update the tracked texcoords for the used tiles. Use scissor intersection to figure out 
         // what the bounds of the real sampling will be if necessary.
