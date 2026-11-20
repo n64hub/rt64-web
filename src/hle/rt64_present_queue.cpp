@@ -218,6 +218,14 @@ namespace RT64 {
                                 break;
                             }
                         }
+
+                        // The framebuffer the frame shows (colorImageShownAddress) is shown where the last three VIs miss it,
+                        // not an earlier color image of the frame's that they hold: Mario Golf's course alone, drawn into the
+                        // framebuffer it showed two frames before as it turned a putt's aim from two framebuffers to a third.
+                        if ((ext.sharedResources->colorImageShownAddress != 0) && (colorFb != presentFb) &&
+                            (colorFb->addressStart == ext.sharedResources->colorImageShownAddress)) {
+                            presentFb = colorFb;
+                        }
                     }
 
                     // Present early (or games that behave like it) will make it so that the presented image is a color image

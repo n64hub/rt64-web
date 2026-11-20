@@ -71,6 +71,9 @@ namespace RT64 {
         // Workload to present state.
         uint32_t viOriginalRate = 0;
         std::vector<uint32_t> colorImageAddressVector;
+        // The framebuffer the frame of colorImageAddressVector shows: the last one its workloads draw that the VI has
+        // shown (Workload::shownFbAddress), or 0. Set with RT64_GAME_FRAME_WORKLOADS only.
+        uint32_t colorImageShownAddress = 0;
         std::unordered_set<uint32_t> colorImageAddressSet;
         std::vector<std::unique_ptr<RenderTarget>> interpolatedColorTargets;
         InterpolatedFrameCounters interpolatedFrames[2];

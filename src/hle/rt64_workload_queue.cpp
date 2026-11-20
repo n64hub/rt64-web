@@ -1338,6 +1338,22 @@ namespace RT64 {
                 // the presentation's SkipBuffering shows, and read it while this thread drew it. Turok 2's map, drawn in the
                 // frame's second workload after the level, was missing from 3-10% of the frames shown while it was open.
                 thread_local std::vector<uint32_t> frameColorImages;
+
+                // The framebuffer the frame shows: the last one its workloads draw that the VI has shown. It alone is the
+                // frame's interpolation target where it is one, not an earlier color image of the frame's, which may be
+                // another framebuffer the VI shows that the game draws a picture of its own into first. Mario Golf, as a
+                // putt's aim turns, draws the course alone into the framebuffer it showed two frames before, then the whole
+                // picture into a third. That one's interpolationEnabled was off (no present had shown it of late) and the
+                // course alone's on, so the frame and the one drawn after it were drawn from the course alone, without the
+                // golfer, the HUD or the aim's grid. The present's SkipBuffering shows it too (colorImageShownAddress).
+                uint32_t frameShownAddress = 0;
+#               if RT64_GAME_FRAME_WORKLOADS
+                for (uint32_t w = 0; w < frameWorkloadCount; w++) {
+                    const Workload &frameWorkload = workloads[workloadIndices[w]];
+                    frameShownAddress = frameWorkload.drawsShown ? frameWorkload.shownFbAddress : frameShownAddress;
+                }
+#               endif
+
                 {
                     std::scoped_lock<std::mutex> managerLock(ext.sharedResources->managerMutex);
                     FramebufferManager &fbManager = ext.sharedResources->framebufferManager;
@@ -1366,6 +1382,10 @@ namespace RT64 {
                         }
 
                         if (!interpolationCandidate || !interpolationTargetKey.isEmpty()) {
+                            continue;
+                        }
+
+                        if ((frameShownAddress != 0) && (colorImg.address != frameShownAddress)) {
                             continue;
                         }
 
@@ -1630,6 +1650,7 @@ namespace RT64 {
                     // After one frame is rendered, we indicate the workload has been processed so the present thread can start presenting frames as soon as it can.
                     if (frame == 0) {
                         ext.sharedResources->colorImageAddressVector = frameColorImages;
+                        ext.sharedResources->colorImageShownAddress = frameShownAddress;
                         threadAdvanceWorkloadId(lastWorkload.workloadId);
                     }
 
