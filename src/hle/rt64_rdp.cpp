@@ -1242,7 +1242,7 @@ namespace RT64 {
         drawRect(ulx, uly, lrx, lry, uls, ult, dsdx, dtdy, flip, extended.global.rect);
     }
     
-    void RDP::drawRect(int32_t ulx, int32_t uly, int32_t lrx, int32_t lry, int16_t uls, int16_t ult, int16_t dsdx, int16_t dtdy, bool flip, const ExtendedAlignment &extAlignment, bool textured) {
+    void RDP::drawRect(int32_t ulx, int32_t uly, int32_t lrx, int32_t lry, int16_t uls, int16_t ult, int16_t dsdx, int16_t dtdy, bool flip, const ExtendedAlignment &extAlignment) {
         // Round down the left and top coordinates in fill mode or copy mode.
         const bool usesFillMode = (otherMode.cycleType() == G_CYC_FILL);
         const bool usesCopyMode = (otherMode.cycleType() == G_CYC_COPY);
@@ -1332,18 +1332,16 @@ namespace RT64 {
         drawCall.rect = drawRect;
         drawCall.rectDsdx = dsdx;
         drawCall.rectDtdy = dtdy;
+#   if RT64_SUBPIXEL_TEXRECTS
+        // A texrect in 1 or 2 cycle mode is drawn at its quarter-pixel corners (FramebufferRenderer). A rect that
+        // steps no texture (a fill rect, or one of a single texel) is drawn as before.
+        drawCall.rectSubpixel = !usesFillMode && !usesCopyMode && ((dsdx != 0) || (dtdy != 0));
+#   else
+        drawCall.rectSubpixel = false;
+#   endif
         drawCall.rectLeftOrigin = extAlignment.leftOrigin;
         drawCall.rectRightOrigin = extAlignment.rightOrigin;
         drawCall.rectAspect = extended.global.rectAspect;
-#   if RT64_SUBPIXEL_TEXRECTS
-        // The renderer draws a texrect at its quarter-pixel corners (FramebufferRenderer), so its texture spans the
-        // rect's own size and starts at its top: the row added below for a top inside a pixel is for the whole pixel
-        // the rect then starts on, which this one does not.
-        const bool subpixel = textured && !usesFillMode && !usesCopyMode;
-#   else
-        const bool subpixel = false;
-#   endif
-        drawCall.rectSubpixel = subpixel;
 
         if (flushedState) {
             state->loadDrawState();
@@ -1373,18 +1371,29 @@ namespace RT64 {
         triPosFloats.insert(triPosFloats.end(), rectPosFloats, rectPosFloats + std::size(rectPosFloats));
         triColorFloats.insert(triColorFloats.end(), rectColorFloats, rectColorFloats + std::size(rectColorFloats));
 
-        // In quarter pixels.
-        const int32_t rectWidth = subpixel ? (drawRect.lrx - drawRect.ulx) : (drawRect.width(true, true) << 2);
-        const int32_t rectHeight = subpixel ? (drawRect.lry - drawRect.uly) : (drawRect.height(true, true) << 2);
-        const int32_t uvWidth = flip ? rectHeight : rectWidth;
-        const int32_t uvHeight = flip ? rectWidth : rectHeight;
+        const int32_t rectWidth = drawRect.width(true, true);
+        const int32_t rectHeight = drawRect.height(true, true);
+        const int32_t uvWidth = (flip ? rectHeight : rectWidth) << 2;
+        const int32_t uvHeight = (flip ? rectWidth : rectHeight) << 2;
         const int32_t lrs = ((uls << 7) + dsdx * uvWidth) >> 7;
         const int32_t lrt = ((ult << 7) + dtdy * uvHeight) >> 7;
-        const float vFractionOffset = ((uly & 0x3) && !subpixel) ? (dtdy >> 5) / 32.0f : 0.0f;
+        const float vFractionOffset = (uly & 0x3) ? (dtdy >> 5) / 32.0f : 0.0f;
         float u1 = uls / 32.0f;
         float v1 = ult / 32.0f + vFractionOffset;
         float u2 = lrs / 32.0f;
         float v2 = lrt / 32.0f + vFractionOffset;
+#   if RT64_SUBPIXEL_TEXRECTS
+        if (drawCall.rectSubpixel) {
+            // Drawn at its quarter-pixel corners, its texture spans its own size from its top, not the whole pixels it
+            // rounds out to, and without the row added above for a top inside a pixel, which is for the whole pixel the
+            // rect would start on.
+            const int32_t subWidth = drawRect.lrx - drawRect.ulx;
+            const int32_t subHeight = drawRect.lry - drawRect.uly;
+            v1 = ult / 32.0f;
+            u2 = (((uls << 7) + dsdx * (flip ? subHeight : subWidth)) >> 7) / 32.0f;
+            v2 = (((ult << 7) + dtdy * (flip ? subWidth : subHeight)) >> 7) / 32.0f;
+        }
+#   endif
         triTcFloats.emplace_back(u1);
         triTcFloats.emplace_back(v1);
         triTcFloats.emplace_back(flip ? u1 : u2);
@@ -1471,7 +1480,7 @@ namespace RT64 {
             lry |= 3;
         }
 
-        drawRect(ulx, uly, lrx, lry, uls, ult, dsdx, dtdy, flip, extAlignment, true);
+        drawRect(ulx, uly, lrx, lry, uls, ult, dsdx, dtdy, flip, extAlignment);
     }
 
     void RDP::updateCallTexcoords(float u, float v) {
