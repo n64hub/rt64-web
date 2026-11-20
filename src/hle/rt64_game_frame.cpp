@@ -285,9 +285,12 @@ namespace RT64 {
     // more than 45 degrees in one game frame, or its eye jumped more than 8 of its near plane's distances and more than 4
     // times as far as it moved the frame before, or it held still the frame before (its eye moved less than a twentieth
     // of a near plane distance) and now turned more than 20 degrees or jumped more than 4. eyeStep is set to how far the
-    // eye moved, in near plane distances, for the next frame's check, or to -1 (not known) after a cut and for a camera
+    // eye moved, in near plane distances, for the next frame's check, a cut's jump too, or to -1 (not known) for a camera
     // these can't be read from (no near plane, a matrix that isn't finite or can't be inverted), which is never called a
-    // cut; prevEyeStep is -1 when the frame before's isn't known.
+    // cut; prevEyeStep is -1 when the frame before's isn't known. A cut once left it -1, so a camera that went on moving
+    // over 8 near plane distances a game frame after a cut was called a cut again on every frame until it slowed, and
+    // drawn without the frames between: Mario Golf's flyovers of Yoshi's Island's holes 14 and 17 fly low and fast from
+    // the doors that open on them, and stepped at the game's 30 a second for one to two seconds.
     //
     // A game that draws its frames with no matrix groups of its own pairs the camera of each frame with the one before,
     // and RT64's frames between drew the cut halfway: Mario Golf cuts from the golfer to the ball and from the ball to
@@ -338,6 +341,7 @@ namespace RT64 {
             return false;
         }
 
+        eyeStep = step;
         const float MaxTurnCosine = 0.7071f;
         const float MinJump = 8.0f;
         const float MinJumpRatio = 4.0f;
@@ -353,7 +357,6 @@ namespace RT64 {
             return true;
         }
 
-        eyeStep = step;
         return false;
     }
 #endif
