@@ -1193,7 +1193,10 @@ namespace RT64 {
                     return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
                 };
 
-                for (uint32_t c = 0; c < 4; c++) {
+                // A triangle with no area (a marker a game draws as a point, to place other work by) covers nothing,
+                // though every edge test of a corner is 0 there.
+                const bool hasArea = edge(float(p0[0]), float(p0[1]), float(p1[0]), float(p1[1]), float(p2[0]), float(p2[1])) != 0.0f;
+                for (uint32_t c = 0; hasArea && (c < 4); c++) {
                     const float px = centerX + (((c & 1) != 0) ? halfWidth : -halfWidth);
                     const float py = centerY + (((c & 2) != 0) ? halfHeight : -halfHeight);
                     const float e0 = edge(float(p0[0]), float(p0[1]), float(p1[0]), float(p1[1]), px, py);
