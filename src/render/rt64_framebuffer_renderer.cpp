@@ -1812,8 +1812,11 @@ namespace RT64 {
 #                       if RT64_SUBPIXEL_TEXRECTS
                             // A texrect drawn at the corners the game gave it, to a quarter pixel, not on the whole pixels
                             // they round up to (convertViewportRect): its texcoords span that size from its top
-                            // (RDP::drawRect), so its texture moves with it by fractions of a pixel.
-                            if (call.callDesc.rectSubpixel) {
+                            // (RDP::drawRect), so its texture moves with it by fractions of a pixel: one in 1 or 2 cycle mode
+                            // that steps a texture (a fill rect steps none).
+                            const uint32_t rectCycleType = call.callDesc.otherMode.cycleType();
+                            if ((rectCycleType != G_CYC_FILL) && (rectCycleType != G_CYC_COPY) &&
+                                ((call.callDesc.rectDsdx != 0) || (call.callDesc.rectDtdy != 0))) {
                                 const FixedRect &rect = call.callDesc.rect;
                                 const float edgeL = float(rect.ulx) / 4.0f - float(rect.left(true));
                                 const float edgeT = float(rect.uly) / 4.0f - float(rect.top(true));

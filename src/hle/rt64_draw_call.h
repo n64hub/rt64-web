@@ -77,9 +77,6 @@ namespace RT64 {
         FixedRect rect;
         int16_t rectDsdx;
         int16_t rectDtdy;
-
-        // A texrect drawn at its quarter-pixel corners (RT64_SUBPIXEL_TEXRECTS): set by every rect.
-        uint8_t rectSubpixel;
         uint16_t rectLeftOrigin;
         uint16_t rectRightOrigin;
         FixedRect scissorRect;

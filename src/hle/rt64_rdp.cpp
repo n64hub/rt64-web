@@ -1332,13 +1332,6 @@ namespace RT64 {
         drawCall.rect = drawRect;
         drawCall.rectDsdx = dsdx;
         drawCall.rectDtdy = dtdy;
-#   if RT64_SUBPIXEL_TEXRECTS
-        // A texrect in 1 or 2 cycle mode is drawn at its quarter-pixel corners (FramebufferRenderer). A rect that
-        // steps no texture (a fill rect, or one of a single texel) is drawn as before.
-        drawCall.rectSubpixel = !usesFillMode && !usesCopyMode && ((dsdx != 0) || (dtdy != 0));
-#   else
-        drawCall.rectSubpixel = false;
-#   endif
         drawCall.rectLeftOrigin = extAlignment.leftOrigin;
         drawCall.rectRightOrigin = extAlignment.rightOrigin;
         drawCall.rectAspect = extended.global.rectAspect;
@@ -1396,10 +1389,11 @@ namespace RT64 {
         triTcFloats.emplace_back(flip ? v1 : v2);
         drawCall.triangleCount += 2;
 #   if RT64_SUBPIXEL_TEXRECTS
-        if (drawCall.rectSubpixel) {
-            // Drawn at its quarter-pixel corners, its texture spans its own size from its top, not the whole pixels it
-            // rounds out to, and without a row added for a top inside a pixel, which is for the whole pixel the rect
-            // would start on. Its two triangles' texcoords, just added, are written again with them.
+        if (!usesFillMode && !usesCopyMode && ((dsdx != 0) || (dtdy != 0))) {
+            // A texrect in 1 or 2 cycle mode (one that steps a texture: a fill rect steps none) is drawn at its
+            // quarter-pixel corners (FramebufferRenderer). Drawn there, its texture spans its own size from its top,
+            // not the whole pixels it rounds out to, and without a row added for a top inside a pixel, which is for the
+            // whole pixel the rect would start on. Its two triangles' texcoords, just added, are written again so.
             const int32_t subWidth = drawRect.lrx - drawRect.ulx;
             const int32_t subHeight = drawRect.lry - drawRect.uly;
             v1 = ult / 32.0f;
