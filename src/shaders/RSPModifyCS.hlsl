@@ -21,10 +21,24 @@ void CSMain(uint modifyIndex : SV_DispatchThreadID) {
     }
 
     const uint modifyOffset = modifyIndex * 2;
-    const bool modifyZ = loadUint32(srcModifyPos, modifyOffset) & 0x1;
-    const uint vertexIndex = loadUint32(srcModifyPos, modifyOffset) >> 1;
+    const uint modifyKind = loadUint32(srcModifyPos, modifyOffset) & 0x3;
+    const uint vertexIndex = loadUint32(srcModifyPos, modifyOffset) >> 2;
     const uint modifyValue = loadUint32(srcModifyPos, modifyOffset + 1);
-    if (modifyZ) {
+    if (modifyKind == 2) {
+        // A corner of a line's quad (RT64_DRAW_LINES, RSP::drawLine): a copy of one end, moved across the line by half its
+        // width, 1.5 pixels and half a pixel more for each step of the width it was drawn with. The other end's vertex is
+        // never a corner, so no thread here writes a position another reads.
+        const uint otherIndex = modifyValue >> 9;
+        const float2 self = screenPos[vertexIndex].xy;
+        const float2 along = screenPos[otherIndex].xy - self;
+        const float alongLength = length(along);
+        if (alongLength > 0.0f) {
+            const float halfWidth = (1.5f + float(modifyValue & 0xFF) * 0.5f) * 0.5f;
+            const float side = (((modifyValue >> 8) & 0x1) != 0) ? 1.0f : -1.0f;
+            screenPos[vertexIndex].xy = self + float2(-along.y, along.x) * (side * halfWidth / alongLength);
+        }
+    }
+    else if (modifyKind == 1) {
         screenPos[vertexIndex].z = modifyValue / 65536.0f;
     }
     else {
