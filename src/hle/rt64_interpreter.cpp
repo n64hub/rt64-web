@@ -9,6 +9,9 @@
 
 //#define DUMP_DISPLAY_LISTS
 
+uint32_t issue104Ring[96][2]; // TEMPORARY: issue 104, taken out before merging.
+uint32_t issue104RingPos = 0;
+
 namespace RT64 {
     static FILE *displayListFp = nullptr;
 
@@ -42,14 +45,6 @@ namespace RT64 {
             UCode.dataAddress = maskedDataAddress;
         }
 
-        {
-            // TEMPORARY: issue 104, taken out before merging.
-            static int loggedLoads = 0;
-            static uint32_t loggedText = 0;
-            const bool logThis = !resetFromTask || (loggedText != maskedTextAddress);
-            loggedText = maskedTextAddress;
-            if (logThis && (loggedLoads < 200)) { loggedLoads++; fprintf(stderr, "UCODE text=%06X data=%06X fromTask=%d geo=%08X\n", maskedTextAddress, maskedDataAddress, int(resetFromTask), state->rsp->geometryModeStack[state->rsp->geometryModeStackSize - 1]); }
-        }
         if (hleGBI != nullptr) {
             GBIReset resetFunction = resetFromTask ? hleGBI->resetFromTask : hleGBI->resetFromLoad;
             if (resetFunction != nullptr) {
@@ -200,6 +195,9 @@ namespace RT64 {
                     }
                 }
 
+                issue104Ring[issue104RingPos % 96][0] = dl->w0; // TEMPORARY: issue 104, taken out before merging.
+                issue104Ring[issue104RingPos % 96][1] = dl->w1;
+                issue104RingPos++;
                 if (func != nullptr) {
                     func(state, &dl);
                 }

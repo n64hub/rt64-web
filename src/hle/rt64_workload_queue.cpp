@@ -489,8 +489,6 @@ namespace RT64 {
             break;
         }
 
-        workloadConfig.targetRate = 0; // TEMPORARY: issue 104, no frames between the game's, taken out before merging.
-
         // Store the rate that was chosen for the configuration.
         ext.sharedResources->targetRate = workloadConfig.targetRate;
 
