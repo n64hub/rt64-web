@@ -13,5 +13,6 @@ namespace RT64 {
         framebuffer.renderToRAM = true;
         framebuffer.copyWithGPU = true;
         framebuffer.renderToRAMLate = false;
+        framebuffer.renderToRAMLateDepthOnly = false;
     }
 };

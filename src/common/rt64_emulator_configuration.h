@@ -28,6 +28,14 @@ namespace RT64 {
             // in a framebuffer's memory right after drawing it: Donkey Kong 64 inflates its main code and data over the
             // framebuffers of its boot screens.
             bool renderToRAMLate;
+
+            // With renderToRAMLate, the copy a list late brings only the framebuffers drawn as depth buffers into RDRAM, for
+            // a game whose CPU reads its depth but never its frames (Excitebike 64's stadium lights look for the hills in
+            // front of them in it). A depth buffer the list cleared as a colour image is left to the list's own depth copy
+            // where that covers the same rows. In Chrome each framebuffer copied is a readback of its own, and the colour
+            // ones cost a page with a large canvas most of what the copy costs it. Copies at a sync in the middle of a list
+            // stay whole: RT64 reads those back itself.
+            bool renderToRAMLateDepthOnly;
         };
 
         Dither dither;

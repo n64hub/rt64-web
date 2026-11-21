@@ -1581,6 +1581,37 @@ namespace RT64 {
                 // The last batch's copies to RAM can wait for the next list (renderToRAMLate): nothing in this one reads them.
                 const bool copyLate = ext.emulatorConfig->framebuffer.renderToRAMLate && (maxFramebufferPair == workload.fbPairCount);
 
+                // Which pairs' colour images go to RAM: with renderToRAMLateDepthOnly, in the late batch, only a framebuffer
+                // drawn as a depth buffer, and that only if no later pair of the batch copies it as depth over the same rows,
+                // which would write over it as the copies land.
+                thread_local std::vector<uint8_t> colorCopied;
+                colorCopied.assign(maxFramebufferPair - framebufferPairCursor, 1);
+                if (copyLate && ext.emulatorConfig->framebuffer.renderToRAMLateDepthOnly) {
+                    for (uint32_t p = framebufferPairCursor; p < maxFramebufferPair; p++) {
+                        if (!getFramebufferPairs(p)) {
+                            continue;
+                        }
+
+                        if (!colorFb->everUsedAsDepth) {
+                            colorCopied[p - framebufferPairCursor] = 0;
+                            continue;
+                        }
+
+                        const Framebuffer *fb = colorFb;
+                        const uint32_t rowWidth = colorWriteWidth;
+                        const uint32_t rowStart = colorRowStart;
+                        const uint32_t rowEnd = std::min(colorRowEnd, colorFb->height);
+                        for (uint32_t q = p + 1; q < maxFramebufferPair; q++) {
+                            if (getFramebufferPairs(q) && (depthFb == fb) && (depthWriteWidth == rowWidth) && (depthRowStart <= rowStart) &&
+                                (std::min(depthRowEnd, depthFb->height) >= rowEnd))
+                            {
+                                colorCopied[p - framebufferPairCursor] = 0;
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 // Preprocess all the framebuffer operations.
                 uint32_t pairCursor = framebufferPairCursor;
                 while (pairCursor < maxFramebufferPair) {
@@ -1777,7 +1808,9 @@ namespace RT64 {
                         }
 
                         // Copy results from render targets back to RAM.
-                        colorFb->copyRenderTargetToNative(ext.framebufferGraphicsWorker, colorTarget, colorWriteWidth, colorRowStart, colorRowEnd, colorImg.fmt, ditherRandomSeed++, ext.shaderLibrary);
+                        if (colorCopied[pairCursor - framebufferPairCursor]) {
+                            colorFb->copyRenderTargetToNative(ext.framebufferGraphicsWorker, colorTarget, colorWriteWidth, colorRowStart, colorRowEnd, colorImg.fmt, ditherRandomSeed++, ext.shaderLibrary);
+                        }
 
                         if (depthWriteWidth > 0) {
                             depthFb->copyRenderTargetToNative(ext.framebufferGraphicsWorker, depthTarget, depthWriteWidth, depthRowStart, depthRowEnd, G_IM_FMT_DEPTH, ditherRandomSeed++, ext.shaderLibrary);
@@ -1809,7 +1842,9 @@ namespace RT64 {
                 pairCursor = framebufferPairCursor;
                 while (pairCursor < maxFramebufferPair) {
                     if (getFramebufferPairs(pairCursor)) {
-                        copyToRAM(colorFb, colorWriteWidth, colorRowStart, std::min(colorRowEnd, colorFb->height));
+                        if (colorCopied[pairCursor - framebufferPairCursor]) {
+                            copyToRAM(colorFb, colorWriteWidth, colorRowStart, std::min(colorRowEnd, colorFb->height));
+                        }
 
                         if (depthWriteWidth > 0) {
                             copyToRAM(depthFb, depthWriteWidth, depthRowStart, std::min(depthRowEnd, depthFb->height));
@@ -1817,6 +1852,12 @@ namespace RT64 {
                     }
 
                     pairCursor++;
+                }
+
+                // A late batch that left nothing to copy has nothing for landRAMCopies to wait on, and its command list is
+                // begun again by the next one: wait for it here, as a batch copied at once does.
+                if (copyLate && pendingRAMCopies.empty()) {
+                    ext.framebufferGraphicsWorker->wait();
                 }
 
                 framebufferPairCursor = maxFramebufferPair;
