@@ -1976,6 +1976,19 @@ namespace RT64 {
             // Indicate the next time a display list is parsed, RDRAM should be checked.
             rdramCheckPending = true;
         }
+#   if RT64_HASH_DRAWN_FRAMEBUFFERS
+        else {
+            // RT64_HASH_DRAWN_FRAMEBUFFERS: without Render to RAM, what RDRAM holds of a framebuffer is only what the CPU
+            // wrote there, and updateScreen() puts what differs from its hash over the picture, as a write made after the
+            // draw. The hash is otherwise only taken there, at a VI that shows the framebuffer, so what the CPU wrote before
+            // a list that drew over it came back over the draw at the next VI that showed it. Excitebike 64 copies a
+            // track's models into its spare framebuffer as a race loads, and the race's first frame clears it black: the
+            // console's RDP overwrote the copy in RDRAM, and RT64 showed it over the black for a frame. So the framebuffers
+            // this list drew are hashed as it ends: what the CPU wrote before it is taken as drawn over, and only what it
+            // writes after is put over the picture.
+            framebufferManager.hashTracking(RDRAM);
+        }
+#   endif
 
 #   if SCRIPT_ENABLED
         // Notify the current script the frame is about to end and should be processed.
