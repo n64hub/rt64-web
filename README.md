@@ -90,6 +90,9 @@ Once all information for a particular game frame has been recorded, RT64 will at
 ## Frame interpolation
 New frames are generated using the information from the previous draw call matching step. For any calls that match, new 3D transformations will be created via interpolation and uploaded to the GPU for the deferred RSP to do its work again. When possible, transformations are decomposed into their constituent components. Those components are interpolated separately and recomposed into the resultant transform to prevent interpolation artifacts caused by naive transformation interpolation. This interpolation can also be applied to texture scrolling coordinates and even per vertex if vertex velocities are computed. More parameters are planned to be supported in the future as long as they're part of the recorded frame data.
 
+In this fork, [docs/map.md](docs/map.md) names the functions that match the draws, place them and copy
+framebuffers, and the logs and dumps that say what they did in a frame that looks wrong.
+
 ## Extended command set
 RT64 offers an extended command set that can be used by native ports, ROM patches, and ROM hacks to provide extra information that the renderer can use to enhance the final result. Using this feature is vital to providing accurate frame interpolation and widescreen enhancements for 2D elements. If you're interested in using this feature, check out the [included header in the repository](https://github.com/rt64/rt64/blob/main/include/rt64_extended_gbi.h). The main activation method is encoded into a NOOP command so it should be safe to run it in real hardware. RT64 will recognize this command and enable the extended command set feature, allowing for an extended repertoire of functions aimed at fixing some common grievances that show up at high framerates or wide aspect ratios.
 

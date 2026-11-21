@@ -1498,6 +1498,7 @@ namespace RT64 {
                 curFrameCounters.shown = false;
                 curFrameCounters.available = 0;
                 curFrameCounters.count = displayFrames;
+                curFrameCounters.workloadId = lastWorkload.workloadId;
 #           if RT64_GAME_FRAME_WORKLOADS
                 curInterpolatedLock.unlock();
 #           endif
@@ -1549,6 +1550,12 @@ namespace RT64 {
                     return (writeCursor != threadCursor);
 #               endif
                 };
+                // RT64_FRAME_DUMP's draws.bin: the game frame as it was paired, and below each frame drawn from it.
+                FrameDump *frameDump = FrameDump::get();
+                if (frameDump != nullptr) {
+                    frameDump->addGameFrame(*this, curFrame);
+                }
+
                 int64_t renderTimeTotalMicro = 0;
                 for (uint32_t frame = 0; (frame < displayFrames) && !skipWorkloadNow; frame++) {
                     // Evaluate if this frame should be skipped. Measure the current time and compare it to what frame is estimated should be have been rendered by now.
@@ -1638,6 +1645,10 @@ namespace RT64 {
                         }
 
                         ext.workloadExtrasUploader->submit(ext.workloadGraphicsWorker, extrasUploads);
+                    }
+
+                    if (frameDump != nullptr) {
+                        frameDump->addRenderedFrame(frame, curFrameWeight);
                     }
 
                     int64_t renderTimeMicro = workloadTimer.elapsedMicroseconds();

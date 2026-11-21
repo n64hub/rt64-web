@@ -31,6 +31,33 @@
 //   picture widened (Expand) its triangles thin out past that view's sides, which no frame shows as a fault where
 //   water or sky lies under the culled ground. A triangle counts once, where it lies, not in every band it reaches
 //   over: the ground's large triangles near the camera reach past both sides whatever is culled.
+// - <dir>/draws.bin: what drew each frame, for a tool to say what covers a part of a flagged frame (the draws there,
+//   what the interpolation paired each with in the game frame before, whether a cut was taken) without a debug print,
+//   a rebuild and another play. A block for each game frame, its 16-byte header (DrawsHeader: magic, the size of what
+//   follows, the game frame's last workload's id) then its text, zstd (DrawsMagicCompressed) on a desktop build, raw
+//   (DrawsMagic) in a browser's. The text is lines of tab-separated fields, each line's first its kind:
+//     F <last workload id> <paired with the frame before (GameFrame::match() ran): 1/0>: the game frame.
+//     W <workload id> <the workload before it was paired with, or -> <camera cut: 1/0> <fb pairs>: each workload.
+//     C <workload id> <fb pair> <projection> <type> <call index> <triangles> <view-projection> <its pair in the
+//       workload before, or -> <first world transform> <last> <the first's pair, or -> <flags, or -: m moved unpaired
+//       with the camera, s its vertices its pair's> <first tile's texture hash, or -> <tiles> <flags, or -: c a tile
+//       copy, s synced> <the first tile paired: 1/0> <rect move, how far the frame before drew each edge from where
+//       this one does, ulx,uly,lrx,lry in the game's pixels, or -> <the game's rect, ulx,uly,lrx,lry, or ->: each
+//       call as GameFrame::match() paired it, type P perspective, O orthographic, R rect, F fill rect, T triangles.
+//     R <rendered frame> <its loop frame> <weight>: each frame drawn from the game frame, the game's own and each one
+//       between, in the order presented: a present's frame i is the game frame's rendered frame i (presents.tsv).
+//     B <workload id> <fb pair> <color image's address> <target width> <target height> <picture width> <picture height>:
+//       a framebuffer pair drawn, the picture its color image at the resolution scale, the box from the target's top
+//       left the VI shows (a target is kept at the largest size drawn), and
+//     D <workload id> <call index> <left> <top> <right> <bottom>: where each of its calls drew, in the target's pixels
+//       (frames.bin's picture is the target from its top left corner, scaled down), after its scissor, the widescreen
+//       origins and aspect, and for a rect the frame's rect moves: a rect exactly, triangles the box of what of them
+//       lies past the near plane in the game frame (the frames between move vertices on the GPU, so it is their
+//       place in the game's own frame). Only the frames presented: a framebuffer drawn for render-to-RAM on the game's
+//       thread writes none.
+//   About a hundredth of frames.bin's size (1.6 MB beside 129 MB for 7 s of a race at 120 frames a second).
+// - <dir>/presents.tsv: "<present id>\t<frame of the present>\t<frames it showed>\t<game frame's last workload id>" for
+//   each frame put in frames.bin, the game frame whose draws.bin block says what drew it.
 //
 // With RT64_FRAME_DUMP_SECONDS, only what comes between those seconds after the first present is written, a scene's
 // worth rather than gigabytes of the boot: about 40 MB a second of frames at 640 wide and 60 a second.
@@ -48,9 +75,10 @@
 // once those commands were waited for, which costs a present a few milliseconds: the dump is a test's, not a
 // player's. A frame's header is timed then, so a frame's time lags its own by one frame's.
 //
-// RT64 calls it from four places only, the present queue's readback(), the RSP's addTriangle(), the application's
-// swapChainCreated() and the shared resources' swapChainRate(), and everything else is here: a game's own changes to
-// RT64 meet its lines in as few places as can be.
+// RT64 calls it from few places, the present queue's readback(), the RSP's addTriangle(), the application's
+// swapChainCreated(), the shared resources' swapChainRate(), the workload queue's addGameFrame() and
+// addRenderedFrame() and the framebuffer renderer's addDraw(), and everything else is here and in rt64_frame_dump.cpp:
+// a game's own changes to RT64 meet its lines in as few places as can be.
 //
 // Frames go to a thread of their own, about a second's in hand at most (MaxQueued, 44 MB of 640x360 frames: a dump of
 // Mario Golf's lost 22 frames at once to a stall of the writer, with 8 in hand, in one of three windows that dumped
@@ -80,6 +108,12 @@
 #include "render/rt64_vi_renderer.h"
 
 namespace RT64 {
+    struct GameCall;
+    struct GameFrame;
+    struct Projection;
+    struct Workload;
+    struct WorkloadQueue;
+
     // rt64_frame_dump.cpp: src as zstd at level into dst, sized to fit, a context kept in context between calls. False,
     // and why in error, where it fails. The one part of the dump not in this header: zstd's header is RT64's own, and
     // programs include this one without it (RecompFrontend's renderer).
@@ -95,6 +129,15 @@ namespace RT64 {
         static constexpr int BandsPerView = 20;
         static constexpr int Bands = BandsPerView * 3;
         static constexpr size_t MaxQueued = 64;
+        static constexpr uint32_t DrawsMagic = 0x57445452; // "RTDW": draws.bin's text follows raw.
+        static constexpr uint32_t DrawsMagicCompressed = 0x5A445452; // "RTDZ": as zstd.
+        static constexpr size_t MaxDrawsQueued = 256;
+
+        struct DrawsHeader {
+            uint32_t magic;
+            uint32_t bytes; // What follows.
+            uint64_t workloadId; // The game frame's last workload's.
+        };
 
         struct FrameHeader {
             uint32_t magic;
@@ -125,6 +168,18 @@ namespace RT64 {
         std::atomic<bool> started = false;
         FILE *framesFile = nullptr;
         FILE *sidesFile = nullptr;
+        FILE *drawsFile = nullptr;
+        FILE *presentsFile = nullptr;
+        std::deque<std::pair<uint64_t, std::string>> drawsQueue; // Game frames' text by their last workload's id.
+        void *drawsCompressContext = nullptr; // Writer thread's.
+        std::vector<uint8_t> drawsSource;
+        std::vector<uint8_t> drawsCompressed;
+        std::string drawsText; // The game frame being drawn's, and the rest, the workload thread's.
+        uint64_t drawsWorkloadId = 0;
+        bool drawsOn = false;
+        uint32_t drawsRendered = 0;
+        const void *drawsFbWorkload = nullptr;
+        uint32_t drawsFbPairIndex = 0;
         std::mutex mutex;
         std::condition_variable condition;
         std::deque<Frame> queue;
@@ -150,6 +205,7 @@ namespace RT64 {
             uint32_t height;
             uint32_t rowPitch;
             bool sixteenBits;
+            uint64_t workloadId;
         } readbackFrame = {};
 
         static FrameDump *get() {
@@ -178,7 +234,9 @@ namespace RT64 {
 
                 d->framesFile = fopen((d->dir + "/frames.bin").c_str(), "wb");
                 d->sidesFile = fopen((d->dir + "/sides.tsv").c_str(), "w");
-                if ((d->framesFile == nullptr) || (d->sidesFile == nullptr)) {
+                d->drawsFile = fopen((d->dir + "/draws.bin").c_str(), "wb");
+                d->presentsFile = fopen((d->dir + "/presents.tsv").c_str(), "w");
+                if ((d->framesFile == nullptr) || (d->sidesFile == nullptr) || (d->drawsFile == nullptr) || (d->presentsFile == nullptr)) {
                     fprintf(stderr, "RT64_FRAME_DUMP: can't write to %s\n", d->dir.c_str());
                     return nullptr;
                 }
@@ -253,13 +311,14 @@ namespace RT64 {
 
         // The frame a present shows, from its color target once the frame is drawn into it (the VI renderer's p, which
         // has drawn it): read back by the present's commands, and handed on at the next one's, the present that read it
-        // back waited for since then. Present thread.
-        void readback(const VIRenderer::RenderParams &p, uint64_t presentId, uint32_t index, uint32_t count) {
+        // back waited for since then. workloadId is the last workload's of the game frame it was drawn from, its
+        // InterpolatedFrameCounters', for presents.tsv. Present thread.
+        void readback(const VIRenderer::RenderParams &p, uint64_t presentId, uint32_t index, uint32_t count, uint64_t workloadId) {
             if (readbackFrame.width > 0) {
                 const uint8_t *data = reinterpret_cast<const uint8_t *>(readbackBuffer->map());
                 if (data != nullptr) {
                     addFrame(readbackFrame.presentId, readbackFrame.index, readbackFrame.count, data, readbackFrame.width,
-                        readbackFrame.height, readbackFrame.rowPitch, readbackFrame.sixteenBits);
+                        readbackFrame.height, readbackFrame.rowPitch, readbackFrame.sixteenBits, readbackFrame.workloadId);
                     readbackBuffer->unmap();
                 }
 
@@ -296,13 +355,13 @@ namespace RT64 {
             commandList->copyTextureRegion(RenderTextureCopyLocation::PlacedFootprint(readbackBuffer.get(), p.textureFormat, width, height, 1, rowPitch / pixelSize),
                 RenderTextureCopyLocation::Subresource(p.texture), 0, 0, 0, &box);
             commandList->barriers(RenderBarrierStage::GRAPHICS, RenderTextureBarrier(p.texture, RenderTextureLayout::SHADER_READ));
-            readbackFrame = { presentId, index, count, width, height, rowPitch, sixteenBits };
+            readbackFrame = { presentId, index, count, width, height, rowPitch, sixteenBits, workloadId };
         }
 
         // A presented frame's pixels, as a readback of its color target holds them: rows rowPitch bytes apart, 4
         // channels of 8 or of 16 bits. Present thread.
         void addFrame(uint64_t presentId, uint32_t index, uint32_t count, const uint8_t *data, uint32_t width, uint32_t height,
-            uint32_t rowPitch, bool sixteenBits)
+            uint32_t rowPitch, bool sixteenBits, uint64_t workloadId)
         {
             if (!started.exchange(true)) {
                 start = std::chrono::steady_clock::now();
@@ -357,16 +416,47 @@ namespace RT64 {
             droppedSinceLast = 0;
             queue.emplace_back(std::move(frame));
             condition.notify_one();
+            fprintf(presentsFile, "%llu\t%u\t%u\t%llu\n", (unsigned long long)(presentId), index, count, (unsigned long long)(workloadId));
+            fflush(presentsFile);
         }
+
+        // draws.bin (rt64_frame_dump.cpp), the workload thread's: a game frame once GameFrame::match() paired it with the
+        // frame before (the last one's text goes to the writer then), each frame drawn from it, and each call as the
+        // framebuffer renderer places it: its type as C's, its scissor in the target's pixels (a fill rect's rect), the
+        // screen scale and offset its vertices are drawn with (InstanceDrawCall's triangles), the target's size, the
+        // resolution scale and the color image's size in the game's pixels, and the widescreen aspect.
+        void addGameFrame(const WorkloadQueue &workloadQueue, const GameFrame &curFrame);
+        void addRenderedFrame(uint32_t frame, float weight);
+        void addDraw(const Workload &workload, uint32_t fbPairIndex, const Projection &proj, const GameCall &call, char type,
+            int32_t left, int32_t top, int32_t right, int32_t bottom, float scaleX, float scaleY, float offsetX, float offsetY,
+            float targetWidth, float targetHeight, float resolutionScaleX, float resolutionScaleY, uint32_t colorWidth, uint32_t colorHeight,
+            float aspectRatioScale);
 
         void writeLoop() {
             for (;;) {
                 Frame frame;
+                std::pair<uint64_t, std::string> draws;
+                bool haveFrame = false;
                 {
                     std::unique_lock<std::mutex> lock(mutex);
-                    condition.wait(lock, [&]() { return !queue.empty(); });
-                    frame = std::move(queue.front());
-                    queue.pop_front();
+                    condition.wait(lock, [&]() { return !queue.empty() || !drawsQueue.empty(); });
+                    if (!drawsQueue.empty()) {
+                        draws = std::move(drawsQueue.front());
+                        drawsQueue.pop_front();
+                    }
+                    else {
+                        frame = std::move(queue.front());
+                        queue.pop_front();
+                        haveFrame = true;
+                    }
+                }
+
+                if (!haveFrame) {
+                    if (!outOfRoom) {
+                        writeDraws(draws.first, draws.second);
+                    }
+
+                    continue;
                 }
 
                 if (!roomToWrite()) {
@@ -401,6 +491,26 @@ namespace RT64 {
             }
 
             return true;
+        }
+
+        // A game frame's draws.bin block: zstd on a desktop build, raw in a browser's. Writer thread.
+        void writeDraws(uint64_t workloadId, const std::string &text) {
+            DrawsHeader header = { DrawsMagic, uint32_t(text.size()), workloadId };
+            const void *data = text.data();
+#       if !defined(__EMSCRIPTEN__)
+            drawsSource.assign(text.begin(), text.end());
+            const char *error = nullptr;
+            if (!frameDumpCompress(drawsCompressContext, drawsSource, drawsCompressed, CompressionLevel, error)) {
+                fprintf(stderr, "RT64_FRAME_DUMP: a frame's draws didn't compress: %s\n", error);
+                return;
+            }
+
+            header = { DrawsMagicCompressed, uint32_t(drawsCompressed.size()), workloadId };
+            data = drawsCompressed.data();
+#       endif
+            fwrite(&header, sizeof(header), 1, drawsFile);
+            fwrite(data, 1, header.bytes, drawsFile);
+            fflush(drawsFile);
         }
 
 #   if !defined(__EMSCRIPTEN__)
