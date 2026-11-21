@@ -1976,17 +1976,32 @@ namespace RT64 {
             // Indicate the next time a display list is parsed, RDRAM should be checked.
             rdramCheckPending = true;
         }
-#   if RT64_HASH_DRAWN_FRAMEBUFFERS
+#   if RT64_HASH_FILLED_FRAMEBUFFERS
         else {
-            // RT64_HASH_DRAWN_FRAMEBUFFERS: without Render to RAM, what RDRAM holds of a framebuffer is only what the CPU
+            // RT64_HASH_FILLED_FRAMEBUFFERS: without Render to RAM, what RDRAM holds of a framebuffer is only what the CPU
             // wrote there, and updateScreen() puts what differs from its hash over the picture, as a write made after the
             // draw. The hash is otherwise only taken there, at a VI that shows the framebuffer, so what the CPU wrote before
-            // a list that drew over it came back over the draw at the next VI that showed it. Excitebike 64 copies a
-            // track's models into its spare framebuffer as a race loads, and the race's first frame clears it black: the
-            // console's RDP overwrote the copy in RDRAM, and RT64 showed it over the black for a frame. So the framebuffers
-            // this list drew are hashed as it ends: what the CPU wrote before it is taken as drawn over, and only what it
-            // writes after is put over the picture.
-            framebufferManager.hashTracking(RDRAM);
+            // a list that cleared the framebuffer came back over the clear at the next VI that showed it. Excitebike 64
+            // copies a track's models into its spare framebuffer as a race loads, and the race's first frame fills it
+            // black: the console's RDP overwrote the copy in RDRAM, and RT64 showed it over the black for a frame. So a
+            // framebuffer this list filled across its whole width and every row RDRAM holds of it is hashed as the list
+            // ends: what the CPU wrote before is taken as filled over, and only what it writes after is put over the
+            // picture. One the list drew only part of keeps its hash, so what the CPU wrote where the list didn't draw
+            // still shows, as on the console (a picture a game decodes into a framebuffer and draws text over). Checking
+            // RAM at the next list's start instead, as render to RAM does, still showed Excitebike's copy.
+            for (uint32_t f = 0; f < workload.fbPairCount; f++) {
+                const FramebufferPair &fbPair = workload.fbPairs[f];
+                if (fbPair.filledRows == 0) {
+                    continue;
+                }
+
+                Framebuffer *colorFb = framebufferManager.find(fbPair.colorImage.address);
+                if ((colorFb != nullptr) && (colorFb->width == fbPair.colorImage.width) && (colorFb->RAMBytes > 0) &&
+                    ((colorFb->imageRowBytes(colorFb->width) * fbPair.filledRows) >= colorFb->RAMBytes))
+                {
+                    colorFb->RAMHash = XXH3_64bits(&RDRAM[colorFb->addressStart], colorFb->RAMBytes);
+                }
+            }
         }
 #   endif
 

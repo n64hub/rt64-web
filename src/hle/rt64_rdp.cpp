@@ -1319,6 +1319,13 @@ namespace RT64 {
                 if (otherMode.zUpd()) {
                     fbPair.drawDepthRect.merge(intRect);
                 }
+
+#           if RT64_HASH_FILLED_FRAMEBUFFERS
+                const bool fillCycle = ((otherMode.H & (3U << G_MDSFT_CYCLETYPE)) == G_CYC_FILL);
+                if (fillCycle && (intRect.left(false) <= 0) && (intRect.top(false) <= 0) && (intRect.right(true) >= int32_t(fbPair.colorImage.width))) {
+                    fbPair.filledRows = std::max(fbPair.filledRows, uint32_t(intRect.bottom(true)));
+                }
+#           endif
             }
         }
         

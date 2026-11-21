@@ -45,6 +45,11 @@ namespace RT64 {
         bool depthWrite;
         bool syncRequired;
         bool fillRectOnly; // This only applies if there's at least one draw call.
+        // How many rows from the top a fill-cycle rect covered across the color image's whole width (RDP::drawRect()):
+        // on the console those rows of RDRAM hold the fill, whatever the CPU wrote there before. Kept only with
+        // RT64_HASH_FILLED_FRAMEBUFFERS (State::fullSync()), and outside its #if so the struct is the same in every
+        // file that includes it.
+        uint32_t filledRows = 0;
         std::vector<uint32_t> startFbDiscards;
         std::vector<FramebufferOperation> startFbOperations;
         std::vector<FramebufferOperation> endFbOperations;
