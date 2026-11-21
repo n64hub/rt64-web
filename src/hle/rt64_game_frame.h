@@ -51,6 +51,10 @@ namespace RT64 {
             // How far the camera's eye moved from the game frame before, in its near plane's distances, for the next
             // frame's cut check (RT64_SKIP_CAMERA_CUTS); -1 when that isn't known (after a cut, or with no frame before).
             float eyeStep = -1.0f;
+
+            // How far the eye moved in the step most of its scene's paired transforms agreed on, in the world's units, for
+            // the next frame's jump check (RT64_MOVE_UNPAIRED_WITH_CAMERA); -1 when they agreed on none.
+            float cameraStep = -1.0f;
         };
 
         struct TransformMap {
@@ -59,6 +63,10 @@ namespace RT64 {
             bool verticesStill = false;
             uint32_t prevTransformIndex = 0;
             bool mapped = false;
+            // Unpaired, drawn in the frames between from this matrix as holding still in the world
+            // (RT64_MOVE_UNPAIRED_WITH_CAMERA).
+            bool moved = false;
+            hlslpp::float4x4 movedPrev;
         };
 
         struct TileMap {

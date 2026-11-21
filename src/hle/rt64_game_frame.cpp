@@ -3,6 +3,7 @@
 //
 
 #include <algorithm>
+#include <cfloat>
 
 #include "common/rt64_math.h"
 
@@ -472,15 +473,6 @@ namespace RT64 {
     }
 #endif
 
-#if RT64_SKIP_PLACE_SWAPS || RT64_PAIR_SAME_MESHES
-    // A hash of a transform's vertices, as many and where they are: one mesh from another, 0 for none.
-    static uint64_t transformMesh(const DrawData &drawData, uint32_t transformIndex) {
-        const uint32_t vertexIndex = drawData.worldTransformVertexIndices[transformIndex];
-        const uint32_t vertexCount = drawData.worldTransformVertexCount(transformIndex);
-        return (vertexCount > 0) ? XXH3_64bits_withSeed(&drawData.posFloats[vertexIndex * 3], vertexCount * 3 * sizeof(float), vertexCount) : 0;
-    }
-#endif
-
 #if RT64_SKIP_PLACE_SWAPS
     // A transform's place, its world matrix's translation, to find whether a frame drew anything at exactly that place:
     // what stands still in a game's world is drawn at the very same translation each frame.
@@ -530,7 +522,9 @@ namespace RT64 {
         const uint32_t transformCount = uint32_t(drawData.worldTransformVertexIndices.size());
         meshes.resize(transformCount);
         for (uint32_t i = 0; i < transformCount; i++) {
-            meshes[i] = transformMesh(drawData, i);
+            const uint32_t vertexIndex = drawData.worldTransformVertexIndices[i];
+            const uint32_t vertexCount = drawData.worldTransformVertexCount(i);
+            meshes[i] = (vertexCount > 0) ? XXH3_64bits_withSeed(&drawData.posFloats[vertexIndex * 3], vertexCount * 3 * sizeof(float), vertexCount) : 0;
         }
     }
 #endif
@@ -2097,86 +2091,131 @@ namespace RT64 {
             matchTransform(firstCurWorkload, firstPrevWorkload, firstCurWorkloadMap, firstPrevWorkloadMap, candidate.curIndex, candidate.prevIndex, modifiedBuffers);
         }
 
-#if RT64_PAIR_SAME_MESHES
-        // A transform left unpaired, with the frame before's that was left unpaired too and drew the very same mesh,
-        // when the scene left only those two with it, one in each frame. Only calls of the same hash pair their
-        // transforms above, and a game can draw an object with another call from one frame to the next while it holds
-        // still or moves as before: another render mode or microcode once it nears past the fog's start, another level
-        // of detail that draws the same vertices. Unpaired, it is drawn at its own matrix in the frames between while
-        // its neighbours move, and where it meets them the picture opens. Excitebike 64 draws each section of a track
-        // with a matrix of its own that holds the camera, fogged under one render mode past a distance and plain under
-        // another nearer, so a section that crossed the distance stood still in the frames between, and as the camera
-        // pitched over a crest the background colour showed between it and the next in a light line across the track
-        // and up the canyon walls, for a frame at a time. A mesh the scene drew more than once among the leftovers on
-        // either side tells one object from another no better than the calls did, and is left as it was.
+#if RT64_MOVE_UNPAIRED_WITH_CAMERA
+        // A transform no pair was found for, drawn in the frames between as holding still in the world. A game that puts
+        // its camera in each object's matrix moves everything that holds still by the camera's step, so most of the
+        // scene's paired transforms agree on one step from their matrix to their pair's, and a transform with no pair
+        // is drawn from its matrix moved back by that step. One a game draws with another call than the frame before's
+        // as it nears (another render mode past the fog's start, another level of detail), or that comes into view, then
+        // moves with its neighbours instead of standing at its own place while they move, with the gaps between them
+        // open. Excitebike 64 draws each section of a track with a matrix of its own that holds the camera, fogged under
+        // one render mode past a distance and plain under another nearer: a section that crossed that distance, and one
+        // that came into view at the picture's side, stood still in the frames between, and the background colour showed
+        // between it and the next in a light line across the track and up the canyon walls, for a frame at a time. A game
+        // whose camera is in the projection leaves what holds still at the same matrix, so the step is none, and a scene
+        // whose paired transforms agree on no step (a cut, or most of it moving on its own) is left as it was.
+        //
+        // Nor is anything moved when the step jumped, its eye moving more than 4 times as far as the frame before's step
+        // did, or when the frame before's scene agreed on none: a cut too small for the cut check (RT64_SKIP_CAMERA_CUTS)
+        // is then drawn as before. Excitebike 64 cuts to a camera on the ground where a rider crashed into a wall, with
+        // the world's sections paired across the cut, and the nearest sections of the shot before, which the shot after
+        // doesn't draw, left the bottom third of the picture the background colour in the frames between, where the
+        // unpaired sections of the shot after had been drawn over it at their own places. Its camera's step otherwise grew
+        // more than 4 times from one game frame to the next in 3 of 3095 on Mountain Quarry: twice as it started from
+        // near rest, and once at speed.
         {
-            thread_local std::vector<std::pair<uint64_t, uint32_t>> curLeftMeshes;
-            thread_local std::vector<std::pair<uint64_t, uint32_t>> prevLeftMeshes;
-            auto collectLeftMeshes = [&](const GameScene &scene, const std::vector<std::pair<uint64_t, GameCallMap>> &callHashMap, uint32_t workloadIndex, bool cur, std::vector<std::pair<uint64_t, uint32_t>> &meshes) {
-                meshes.clear();
-                const Workload &workload = workloadQueue.workloads[workloadIndex];
-                for (const std::pair<uint64_t, GameCallMap> &it : callHashMap) {
-                    const GameCallMap &callMap = it.second;
-                    const GameIndices::Projection &projIndices = scene.projections[callMap.sceneProjIndex];
-                    if (!callMap.doTransformMatching || (projIndices.workloadIndex != workloadIndex)) {
+            const DrawData &curData = firstCurWorkload.drawData;
+            const DrawData &prevData = firstPrevWorkload.drawData;
+            thread_local std::vector<uint32_t> sceneTransforms;
+            thread_local std::vector<uint32_t> pairedTransforms;
+            sceneTransforms.clear();
+            pairedTransforms.clear();
+            for (const std::pair<uint64_t, GameCallMap> &it : curCallHashMap) {
+                const GameCallMap &callMap = it.second;
+                const GameIndices::Projection &projIndices = curScene.projections[callMap.sceneProjIndex];
+                if (!callMap.doTransformMatching || (projIndices.workloadIndex != firstCurProjIndices.workloadIndex)) {
+                    continue;
+                }
+
+                const GameCall &call = firstCurWorkload.fbPairs[projIndices.fbPairIndex].projections[projIndices.projectionIndex].gameCalls[callMap.callIndex];
+                for (uint32_t m = call.callDesc.minWorldMatrix; m <= call.callDesc.maxWorldMatrix; m++) {
+                    const TransformGroup &group = curData.transformGroups[curData.worldTransformGroups[m]];
+                    if (group.matrixId == G_EX_ID_AUTO) {
+                        sceneTransforms.emplace_back(m);
+                    }
+                }
+            }
+
+            std::sort(sceneTransforms.begin(), sceneTransforms.end());
+            sceneTransforms.erase(std::unique(sceneTransforms.begin(), sceneTransforms.end()), sceneTransforms.end());
+            // Paired transforms whose pair's index is one of this scene's workload of the frame before: another scene's pair
+            // may be of another workload, and a step read from one that isn't only fails to agree with the rest.
+            const size_t prevTransformCount = prevData.worldTransforms.size();
+            for (uint32_t m : sceneTransforms) {
+                const GameFrameMap::TransformMap &transformMap = firstCurWorkloadMap.transforms[m];
+                if (transformMap.mapped && (transformMap.prevTransformIndex < prevTransformCount)) {
+                    pairedTransforms.emplace_back(m);
+                }
+            }
+
+            // How far a step leaves a paired transform's matrix from its pair's: the largest row's miss, against the
+            // largest row, so that it reads the same at any scale.
+            auto stepMiss = [&](const hlslpp::float4x4 &step, uint32_t m) {
+                const hlslpp::float4x4 cur = curData.worldTransforms[m];
+                const hlslpp::float4x4 prev = prevData.worldTransforms[firstCurWorkloadMap.transforms[m].prevTransformIndex];
+                const hlslpp::float4x4 moved = hlslpp::mul(cur, step);
+                float miss = 0.0f;
+                float size = 0.0f;
+                for (int r = 0; r < 4; r++) {
+                    miss = std::max(miss, float(hlslpp::length(moved[r] - prev[r])));
+                    size = std::max(size, float(hlslpp::length(prev[r])));
+                }
+
+                return (size > 0.0f) ? (miss / size) : FLT_MAX;
+            };
+
+            // The step of up to 16 of the paired transforms, spread over them, each tried on all of them.
+            const float StepTolerance = 1e-3f;
+            const uint32_t pairedCount = uint32_t(pairedTransforms.size());
+            const uint32_t tries = std::min(pairedCount, 16U);
+            uint32_t bestCount = 0;
+            uint32_t bestIndex = UINT32_MAX;
+            hlslpp::float4x4 bestStep;
+            for (uint32_t t = 0; t < tries; t++) {
+                const uint32_t c = pairedTransforms[(uint64_t(t) * pairedCount) / tries];
+                const hlslpp::float4x4 cur = curData.worldTransforms[c];
+                if (fabsf(float(hlslpp::determinant(extract3x3(cur)))) < 1e-12f) {
+                    continue;
+                }
+
+                const hlslpp::float4x4 step = hlslpp::mul(hlslpp::inverse(cur), hlslpp::float4x4(prevData.worldTransforms[firstCurWorkloadMap.transforms[c].prevTransformIndex]));
+                uint32_t count = 0;
+                for (uint32_t m : pairedTransforms) {
+                    count += (stepMiss(step, m) < StepTolerance) ? 1 : 0;
+                }
+
+                if (count > bestCount) {
+                    bestCount = count;
+                    bestIndex = c;
+                    bestStep = step;
+                }
+            }
+
+            const hlslpp::float4x4 Identity(1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+            const bool agreed = (bestIndex != UINT32_MAX) && (bestCount >= 3) && ((bestCount * 2) > pairedCount);
+            const float MaxJumpRatio = 4.0f;
+            const float stepLength = agreed ? float(hlslpp::length(hlslpp::float3(bestStep[3].xyz))) : -1.0f;
+            const float prevStepLength = (firstPrevWorkloadMap != nullptr) ? firstPrevWorkloadMap->viewProjections[firstPrevProj.transformsIndex].cameraStep : -1.0f;
+            const bool jumped = (prevStepLength < 0.0f) || (stepLength > (prevStepLength * MaxJumpRatio));
+            firstCurWorkloadMap.viewProjections[firstCurProj.transformsIndex].cameraStep = stepLength;
+            if (agreed && !jumped && (stepMiss(Identity, bestIndex) >= (StepTolerance * 0.1f))) {
+                // Drawn as the transform whose step it takes is, from its own pair of matrices.
+                const RigidBody &stepBody = firstCurWorkloadMap.transforms[bestIndex].rigidBody;
+                for (uint32_t m : sceneTransforms) {
+                    GameFrameMap::TransformMap &transformMap = firstCurWorkloadMap.transforms[m];
+                    if (transformMap.mapped) {
                         continue;
                     }
 
-                    const GameCall &call = workload.fbPairs[projIndices.fbPairIndex].projections[projIndices.projectionIndex].gameCalls[callMap.callIndex];
-                    for (uint32_t m = call.callDesc.minWorldMatrix; m <= call.callDesc.maxWorldMatrix; m++) {
-                        const bool paired = cur ? firstCurWorkloadMap.transforms[m].mapped : firstCurWorkloadMap.prevTransformsMapped[m];
-                        const TransformGroup &group = workload.drawData.transformGroups[workload.drawData.worldTransformGroups[m]];
-                        if (paired || (group.matrixId != G_EX_ID_AUTO)) {
-                            continue;
-                        }
-
-                        const uint64_t mesh = transformMesh(workload.drawData, m);
-                        if (mesh != 0) {
-                            meshes.emplace_back(mesh, m);
-                        }
-                    }
-                }
-
-                std::sort(meshes.begin(), meshes.end());
-                meshes.erase(std::unique(meshes.begin(), meshes.end()), meshes.end());
-            };
-
-            collectLeftMeshes(curScene, curCallHashMap, firstCurProjIndices.workloadIndex, true, curLeftMeshes);
-            collectLeftMeshes(prevScene, prevCallHashMap, firstPrevProjIndices.workloadIndex, false, prevLeftMeshes);
-            auto meshEnd = [](const std::vector<std::pair<uint64_t, uint32_t>> &meshes, size_t i) {
-                size_t j = i;
-                while ((j < meshes.size()) && (meshes[j].first == meshes[i].first)) {
-                    j++;
-                }
-
-                return j;
-            };
-
-            size_t c = 0;
-            size_t p = 0;
-            while ((c < curLeftMeshes.size()) && (p < prevLeftMeshes.size())) {
-                if (curLeftMeshes[c].first < prevLeftMeshes[p].first) {
-                    c = meshEnd(curLeftMeshes, c);
-                }
-                else if (curLeftMeshes[c].first > prevLeftMeshes[p].first) {
-                    p = meshEnd(prevLeftMeshes, p);
-                }
-                else {
-                    const size_t cEnd = meshEnd(curLeftMeshes, c);
-                    const size_t pEnd = meshEnd(prevLeftMeshes, p);
-                    if (((cEnd - c) == 1) && ((pEnd - p) == 1)) {
-                        // Only what pairs any two transforms holds here too: not across a mirror, nor a collapse.
-                        const uint32_t curIndex = curLeftMeshes[c].second;
-                        const uint32_t prevIndex = prevLeftMeshes[p].second;
-                        const TransformMatchResult matchResult = computeTransformMatch(firstCurWorkload.drawData.worldTransforms[curIndex], firstCurViewProj,
-                            firstPrevWorkload.drawData.worldTransforms[prevIndex], firstPrevViewProj, nullptr);
-                        if (matchResult.valid) {
-                            matchTransform(firstCurWorkload, firstPrevWorkload, firstCurWorkloadMap, firstPrevWorkloadMap, curIndex, prevIndex, modifiedBuffers);
-                        }
-                    }
-
-                    c = cEnd;
-                    p = pEnd;
+                    const hlslpp::float4x4 cur = curData.worldTransforms[m];
+                    const hlslpp::float4x4 moved = hlslpp::mul(cur, bestStep);
+                    const TransformGroup &group = curData.transformGroups[curData.worldTransformGroups[m]];
+                    transformMap.rigidBody = stepBody;
+                    transformMap.rigidBody.linearVelocity = cur[3].xyz - moved[3].xyz;
+                    transformMap.rigidBody.updateDecomposition(moved, group.decompose);
+                    transformMap.rigidBody.updateDecomposition(cur, group.decompose);
+                    transformMap.movedPrev = moved;
+                    transformMap.moved = true;
                 }
             }
         }

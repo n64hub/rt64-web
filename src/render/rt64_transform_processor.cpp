@@ -39,8 +39,8 @@ namespace RT64 {
                 const DrawData &prevDrawData = p.workloadQueue->workloads[workloadMap.prevWorkloadIndex].drawData;
                 for (size_t t = 0; t < drawData.worldTransforms.size(); t++) {
                     const GameFrameMap::TransformMap &transformMap = workloadMap.transforms[t];
-                    if (transformMap.mapped) {
-                        const hlslpp::float4x4 &prevTransform = prevDrawData.worldTransforms[workloadMap.transforms[t].prevTransformIndex];
+                    if (transformMap.mapped || transformMap.moved) {
+                        const hlslpp::float4x4 prevTransform = transformMap.mapped ? hlslpp::float4x4(prevDrawData.worldTransforms[transformMap.prevTransformIndex]) : transformMap.movedPrev;
                         const hlslpp::float4x4 &curTransform = drawData.worldTransforms[t];
                         prevMatrix = transformMap.rigidBody.lerp(p.prevFrameWeight, prevTransform, curTransform, true);
                         curMatrix = transformMap.rigidBody.lerp(p.curFrameWeight, prevTransform, curTransform, true);
