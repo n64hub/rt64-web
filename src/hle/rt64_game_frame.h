@@ -110,6 +110,11 @@ namespace RT64 {
             // frame before drew them, in pixels, its upper left's in xy and its lower right's in zw, for one that moved
             // and kept its textures; empty past the last that moved.
             std::vector<hlslpp::float4> rectMoves;
+
+            // RT64_SKIP_CAMERA_CUTS: a camera of the workload's cut to another shot (isCameraCut()), so its rects pair
+            // with none of the frame before either.
+            bool cameraCut = false;
+
             std::vector<ViewProjectionMap> viewProjections;
             std::vector<TransformMap> transforms;
             std::vector<TileMap> tiles;
@@ -119,10 +124,6 @@ namespace RT64 {
             std::vector<bool> prevLookAtMapped;
             uint32_t prevWorkloadIndex = 0;
             bool mapped = false;
-
-            // RT64_SKIP_CAMERA_CUTS: a camera of the workload's cut to another shot (isCameraCut()), so its rects pair
-            // with none of the frame before either.
-            bool cameraCut = false;
         };
 
         std::vector<WorkloadMap> workloads;
