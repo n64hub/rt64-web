@@ -16,6 +16,9 @@
 #include "rt64_descriptor_sets.h"
 #include "rt64_render_worker.h"
 
+// RT64_FRAME_DUMP's draws.bin, apart from the lines around it, which games' own changes to RT64 change.
+#include "hle/rt64_frame_dump.h"
+
 // TODO: Move to shared.
 
 namespace interop {
@@ -48,9 +51,6 @@ namespace interop {
         float2 TexelSize;
     };
 };
-
-// RT64_FRAME_DUMP's draws.bin, apart from the includes above, which games' own changes to RT64 change.
-#include "hle/rt64_frame_dump.h"
 
 namespace RT64 {
     // Helper functions.
@@ -1576,7 +1576,6 @@ namespace RT64 {
         uint32_t vertexTestZFaceIndicesStart = 0;
         int32_t vertexTestZCallIndex = -1;
         RenderViewport viewportClip;
-        FrameDump *frameDump = FrameDump::get();
         for (uint32_t pr = 0; (pr < fbPair.projectionCount) && (globalCallIndex < p.maxGameCall); pr++) {
             const Projection &proj = fbPair.projections[pr];
             if (proj.scissorRect.isNull()) {
@@ -1675,11 +1674,6 @@ namespace RT64 {
                     }
 
                     clearRect.rect = convertFixedRect(call.callDesc.rect, p.resolutionScale, p.fbWidth, invRatioScale, extOriginPercentage, horizontalMisalignment, call.callDesc.rectLeftOrigin, call.callDesc.rectRightOrigin);
-                    if (frameDump != nullptr) {
-                        frameDump->addDraw(*p.curWorkload, p.fbPairIndex, proj, call, 'F', clearRect.rect.left, clearRect.rect.top, clearRect.rect.right,
-                            clearRect.rect.bottom, 1.0f, 1.0f, 0.0f, 0.0f, framebuffer.viewport.width, framebuffer.viewport.height, float(p.resolutionScale.x), float(p.resolutionScale.y),
-                            p.fbWidth, p.fbHeight, aspectRatioScale);
-                    }
                 }
                 else if (call.callDesc.extendedType != DrawExtendedType::None) {
                     switch (call.callDesc.extendedType) {
@@ -1894,6 +1888,7 @@ namespace RT64 {
                         }
                         
                         // RT64_FRAME_DUMP's draws.bin: where the call drew, placed as it is drawn.
+                        FrameDump *frameDump = FrameDump::get();
                         if ((frameDump != nullptr) && (instanceDrawCall.type != InstanceDrawCall::Type::Unknown)) {
                             const char dumpType = (proj.type == Projection::Type::Perspective) ? 'P' : (proj.type == Projection::Type::Orthographic) ? 'O' :
                                 (proj.type == Projection::Type::Rectangle) ? 'R' : 'T';
@@ -1908,6 +1903,16 @@ namespace RT64 {
                             vertexTestZFaceIndicesStart += call.callDesc.triangleCount * 3;
                         }
                     }
+                }
+
+                // RT64_FRAME_DUMP's draws.bin: a fill rect, where it clears. Here, past the lines that place it, which games'
+                // own changes to RT64 change.
+                FrameDump *frameDump = FrameDump::get();
+                if ((frameDump != nullptr) && (instanceDrawCall.type == InstanceDrawCall::Type::FillRect)) {
+                    const RenderRect &fillRect = instanceDrawCall.clearRect.rect;
+                    frameDump->addDraw(*p.curWorkload, p.fbPairIndex, proj, call, 'F', fillRect.left, fillRect.top, fillRect.right, fillRect.bottom, 1.0f, 1.0f,
+                        0.0f, 0.0f, framebuffer.viewport.width, framebuffer.viewport.height, float(p.resolutionScale.x), float(p.resolutionScale.y), p.fbWidth,
+                        p.fbHeight, aspectRatioScale);
                 }
 
                 // Determine to use the draw call either in the RT scene or the raster scene.

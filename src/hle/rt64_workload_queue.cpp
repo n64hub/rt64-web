@@ -1636,6 +1636,12 @@ namespace RT64 {
                         curFrameWeight = 1.0f;
                     }
 
+                    // RT64_FRAME_DUMP's draws.bin: the frame drawn next, which the framebuffer renderer's draws go under. Here,
+                    // apart from the lines before the frame is drawn, which games' own changes to RT64 change.
+                    if (frameDump != nullptr) {
+                        frameDump->addRenderedFrame(frame, curFrameWeight);
+                    }
+
                     const bool uploadExtras = (frame == 0) && workloadConfig.raytracingEnabled;
                     if (uploadExtras) {
                         std::vector<BufferUploader::Upload> extrasUploads;
@@ -1645,10 +1651,6 @@ namespace RT64 {
                         }
 
                         ext.workloadExtrasUploader->submit(ext.workloadGraphicsWorker, extrasUploads);
-                    }
-
-                    if (frameDump != nullptr) {
-                        frameDump->addRenderedFrame(frame, curFrameWeight);
                     }
 
                     int64_t renderTimeMicro = workloadTimer.elapsedMicroseconds();
