@@ -1535,12 +1535,6 @@ namespace RT64 {
                 bool skipWorkloadNow = false;
                 uint32_t targetIndex = 0;
                 uint32_t framesRendered = 0;
-                // RT64_FRAME_DUMP's draws.bin: the game frame as it was paired, and below each frame drawn from it.
-                FrameDump *frameDump = FrameDump::get();
-                if (frameDump != nullptr) {
-                    frameDump->addGameFrame(*this, curFrame);
-                }
-
                 auto newerWorkloadQueued = [&]() {
                     std::scoped_lock<std::mutex> cursorLock(cursorMutex);
 #               if RT64_GAME_FRAME_WORKLOADS
@@ -1556,6 +1550,12 @@ namespace RT64 {
                     return (writeCursor != threadCursor);
 #               endif
                 };
+                // RT64_FRAME_DUMP's draws.bin: the game frame as it was paired, and below each frame drawn from it.
+                FrameDump *frameDump = FrameDump::get();
+                if (frameDump != nullptr) {
+                    frameDump->addGameFrame(*this, curFrame);
+                }
+
                 int64_t renderTimeTotalMicro = 0;
                 for (uint32_t frame = 0; (frame < displayFrames) && !skipWorkloadNow; frame++) {
                     // Evaluate if this frame should be skipped. Measure the current time and compare it to what frame is estimated should be have been rendered by now.
