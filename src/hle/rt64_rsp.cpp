@@ -1404,7 +1404,16 @@ namespace RT64 {
     }
 
     void RSP::setGBI(GBI *gbi) {
+#   if RT64_REJ_WITHOUT_NEAR_CLIP
+        // A Rej microcode doesn't clip: it rejects a triangle with a vertex outside its reject box, which gSPClipRatio
+        // sizes in x and y and which has a far plane but no near one (the SDK's gspF3DLX). What lies past the near plane
+        // in front of the camera is drawn, as a NoN microcode draws it, and RasterPS discarded it as clipped. Excitebike
+        // 64 draws each rider from above into its shadow texture through a projection that puts all of it there (its
+        // depth scale is lost to the matrix's 16.16), so no shadow was drawn on the ground.
+        NoN = gbi->flags.NoN || gbi->flags.ReJ;
+#   else
         NoN = gbi->flags.NoN;
+#   endif
         cullBothMask = gbi->constants[F3DENUM::G_CULL_BOTH];
         cullFrontMask = gbi->constants[F3DENUM::G_CULL_FRONT];
         projMask = gbi->constants[F3DENUM::G_MTX_PROJECTION];
