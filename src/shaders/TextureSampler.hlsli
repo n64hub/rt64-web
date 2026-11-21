@@ -296,7 +296,7 @@ float4 sampleTileTextureGrad(const GPUTile gpuTile, uint nativeSampler, float2 n
 #endif
 }
 
-float4 sampleTextureLevel(const RDPTile rdpTile, const GPUTile gpuTile, bool filterBilerp, bool filterAverage, bool linearFiltering, float2 uvCoord, uint tlut, bool canDecodeTMEM, uint mipLevel, bool usesHDR) {
+float4 sampleTextureLevel(const RDPTile rdpTile, const GPUTile gpuTile, bool filterBilerp, bool filterAverage, bool linearFiltering, float2 uvCoord, uint tlut, bool canDecodeTMEM, uint mipLevel, bool usesHDR, bool filterByAlpha) {
     float2 tcScale = gpuTile.tcScale;
     float mipScale = float(1U << mipLevel);
     uvCoord /= mipScale;
@@ -383,22 +383,40 @@ float4 sampleTextureLevel(const RDPTile rdpTile, const GPUTile gpuTile, bool fil
         float4 sample01 = samples[1];
         float4 sample10 = samples[2];
         float4 sample11 = samples[3];
+#if FILTER_BY_ALPHA
+        // RT64_FILTER_BY_ALPHA: each texel's colour weighted by its alpha, so a texel the alpha leaves out (a palette's
+        // transparent green round a sprite) gives a filtered edge none of its colour. The filter is linear in its
+        // samples, so the weighted colour is the filtered premultiplied colour over the filtered alpha.
+        if (filterByAlpha) {
+            sample00.rgb *= sample00.a;
+            sample01.rgb *= sample01.a;
+            sample10.rgb *= sample10.a;
+            sample11.rgb *= sample11.a;
+        }
+#endif
+        float4 filtered;
         if (linearFiltering) {
-            return lerp(lerp(sample00, sample10, fracPart.x), lerp(sample01, sample11, fracPart.x), fracPart.y);
+            filtered = lerp(lerp(sample00, sample10, fracPart.x), lerp(sample01, sample11, fracPart.x), fracPart.y);
         }
         else {
             const bool useAverage = filterAverage && all(abs(fracPart - 0.5f) <= (1.0f / LowPrecision));
             if (filterAverage && useAverage) {
-                return (sample00 + sample01 + sample10 + sample11) / 4.0f;
+                filtered = (sample00 + sample01 + sample10 + sample11) / 4.0f;
             }
             else {
             // Originally written by ArthurCarvalho
             // Sourced from https://www.emutalk.net/threads/emulating-nintendo-64-3-sample-bilinear-filtering-using-shaders.54215/
                 float4 tri0 = lerp(sample00, sample10, fracPart.x) + (sample01 - sample00) * fracPart.y;
                 float4 tri1 = lerp(sample11, sample01, 1.0f - fracPart.x) + (sample10 - sample11) * (1.0f - fracPart.y);
-                return lerp(tri0, tri1, step(1.0f, fracPart.x + fracPart.y));
+                filtered = lerp(tri0, tri1, step(1.0f, fracPart.x + fracPart.y));
             }
         }
+#if FILTER_BY_ALPHA
+        if (filterByAlpha && (filtered.a > 0.0f)) {
+            filtered.rgb = saturate(filtered.rgb / filtered.a);
+        }
+#endif
+        return filtered;
     }
     else {
         return sample00;
@@ -440,6 +458,11 @@ float4 sampleTexture(OtherMode otherMode, RenderFlags renderFlags, float2 inputU
     const bool filterBilerp = (filter != G_TF_POINT) && (cycleType != G_CYC_COPY);
     const bool filterAverage = (filter == G_TF_AVERAGE);
     const bool linearFiltering = renderFlagLinearFiltering(renderFlags);
+#if FILTER_BY_ALPHA
+    const bool filterByAlpha = otherMode.cvgXAlpha() || (otherMode.alphaCompare() != G_AC_NONE);
+#else
+    const bool filterByAlpha = false;
+#endif
     
 #if FIX_UPSCALING_PRECISION
     // Account for the fact that scaling can result in less than perfect results that affect the quality of point filtering.
@@ -494,7 +517,7 @@ float4 sampleTexture(OtherMode otherMode, RenderFlags renderFlags, float2 inputU
 #if USE_FOR_LOOPS
     [unroll]
     for (uint i = 0; i < numRDPSamples; i++) {
-        textureSamples[i] = sampleTextureLevel(rdpTile, gpuTile, filterBilerp, filterAverage, linearFiltering, uvCoord, tlut, canDecodeTMEM, RDPMipLevels[i], usesHDR);
+        textureSamples[i] = sampleTextureLevel(rdpTile, gpuTile, filterBilerp, filterAverage, linearFiltering, uvCoord, tlut, canDecodeTMEM, RDPMipLevels[i], usesHDR, filterByAlpha);
     }
 #elif defined(WEBGPU) && defined(PER_DRAW_TEXTURES)
     // A level is its four taps' texels found and loaded (sampleTextureLevel()), most of a pixel shader with mip LOD, so
@@ -503,7 +526,7 @@ float4 sampleTexture(OtherMode otherMode, RenderFlags renderFlags, float2 inputU
     // prebuilt pixel shader with mip LOD is about 70 KB of WGSL instead of 185 (RasterPS.hlsl has what Firefox saves).
     [loop]
     for (uint i = 0; i < numRDPSamples; i++) {
-        const float4 levelSample = sampleTextureLevel(rdpTile, gpuTile, filterBilerp, filterAverage, linearFiltering, uvCoord, tlut, canDecodeTMEM, (i == 0) ? RDPMipLevels[0] : RDPMipLevels[1], usesHDR);
+        const float4 levelSample = sampleTextureLevel(rdpTile, gpuTile, filterBilerp, filterAverage, linearFiltering, uvCoord, tlut, canDecodeTMEM, (i == 0) ? RDPMipLevels[0] : RDPMipLevels[1], usesHDR, filterByAlpha);
         if (i == 0) {
             textureSamples[0] = levelSample;
         }
@@ -512,10 +535,10 @@ float4 sampleTexture(OtherMode otherMode, RenderFlags renderFlags, float2 inputU
         }
     }
 #else
-    textureSamples[0] = sampleTextureLevel(rdpTile, gpuTile, filterBilerp, filterAverage, linearFiltering, uvCoord, tlut, canDecodeTMEM, RDPMipLevels[0], usesHDR);
+    textureSamples[0] = sampleTextureLevel(rdpTile, gpuTile, filterBilerp, filterAverage, linearFiltering, uvCoord, tlut, canDecodeTMEM, RDPMipLevels[0], usesHDR, filterByAlpha);
     
     if (numRDPSamples > 1) {
-        textureSamples[1] = sampleTextureLevel(rdpTile, gpuTile, filterBilerp, filterAverage, linearFiltering, uvCoord, tlut, canDecodeTMEM, RDPMipLevels[1], usesHDR);
+        textureSamples[1] = sampleTextureLevel(rdpTile, gpuTile, filterBilerp, filterAverage, linearFiltering, uvCoord, tlut, canDecodeTMEM, RDPMipLevels[1], usesHDR, filterByAlpha);
     }
 #endif
 
