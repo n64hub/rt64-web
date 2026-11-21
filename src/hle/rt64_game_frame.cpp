@@ -628,7 +628,12 @@ namespace RT64 {
     // pixels away. It is never paired with one of another size, having no texels to say it is the same thing cut. One
     // that moved is drawn between where it was and where it is, and at the corners the game gave it to a quarter pixel
     // (the framebuffer renderer): Mario Golf draws a ball far from the camera as a dot of primitive colour two pixels
-    // by one, which held its place for a game frame and then stepped a pixel.
+    // by one, which held its place for a game frame and then stepped a pixel. One the frame before drew a rect of
+    // colour of its size in the same place, in another colour, changed colour where it stands, and pairs with no
+    // look-alike elsewhere: a fade drawn in columns whose alpha ramps across the screen as it sweeps (Excitebike 64's,
+    // 64 columns as high as the screen) paired each column with the one that had its alpha a game frame before, up to
+    // the screen's height away, and the frames between slid the columns from there, a strip of the picture uncovered
+    // where the ramp met the black.
     static void matchRectScrolls(const Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &workloadMap, bool &tileInterpolationUsed, bool untextured) {
         struct RectCall {
             const DrawCall *call;
@@ -961,6 +966,19 @@ namespace RT64 {
             }
 
             const DrawCall &curCall = *curRects[r].call;
+            if (untextured) {
+                // A rect of colour where the frame before drew one of its size, in another colour, stays (above).
+                bool placeDrawn = false;
+                for (size_t j = 0; (j < prevRects.size()) && !placeDrawn; j++) {
+                    const DrawCall &prevCall = *prevRects[j].call;
+                    placeDrawn = (prevCall.gameRect.ulx == curCall.gameRect.ulx) && (prevCall.gameRect.uly == curCall.gameRect.uly) && sameSize(curCall, prevCall);
+                }
+
+                if (placeDrawn) {
+                    continue;
+                }
+            }
+
             const size_t own = curOwn[r];
             if (own < prevRects.size()) {
                 const DrawCall &ownCall = *prevRects[own].call;
