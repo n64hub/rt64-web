@@ -472,6 +472,15 @@ namespace RT64 {
     }
 #endif
 
+#if RT64_SKIP_PLACE_SWAPS || RT64_PAIR_SAME_MESHES
+    // A hash of a transform's vertices, as many and where they are: one mesh from another, 0 for none.
+    static uint64_t transformMesh(const DrawData &drawData, uint32_t transformIndex) {
+        const uint32_t vertexIndex = drawData.worldTransformVertexIndices[transformIndex];
+        const uint32_t vertexCount = drawData.worldTransformVertexCount(transformIndex);
+        return (vertexCount > 0) ? XXH3_64bits_withSeed(&drawData.posFloats[vertexIndex * 3], vertexCount * 3 * sizeof(float), vertexCount) : 0;
+    }
+#endif
+
 #if RT64_SKIP_PLACE_SWAPS
     // A transform's place, its world matrix's translation, to find whether a frame drew anything at exactly that place:
     // what stands still in a game's world is drawn at the very same translation each frame.
@@ -521,9 +530,7 @@ namespace RT64 {
         const uint32_t transformCount = uint32_t(drawData.worldTransformVertexIndices.size());
         meshes.resize(transformCount);
         for (uint32_t i = 0; i < transformCount; i++) {
-            const uint32_t vertexIndex = drawData.worldTransformVertexIndices[i];
-            const uint32_t vertexCount = drawData.worldTransformVertexCount(i);
-            meshes[i] = (vertexCount > 0) ? XXH3_64bits_withSeed(&drawData.posFloats[vertexIndex * 3], vertexCount * 3 * sizeof(float), vertexCount) : 0;
+            meshes[i] = transformMesh(drawData, i);
         }
     }
 #endif
@@ -2089,6 +2096,91 @@ namespace RT64 {
 
             matchTransform(firstCurWorkload, firstPrevWorkload, firstCurWorkloadMap, firstPrevWorkloadMap, candidate.curIndex, candidate.prevIndex, modifiedBuffers);
         }
+
+#if RT64_PAIR_SAME_MESHES
+        // A transform left unpaired, with the frame before's that was left unpaired too and drew the very same mesh,
+        // when the scene left only those two with it, one in each frame. Only calls of the same hash pair their
+        // transforms above, and a game can draw an object with another call from one frame to the next while it holds
+        // still or moves as before: another render mode or microcode once it nears past the fog's start, another level
+        // of detail that draws the same vertices. Unpaired, it is drawn at its own matrix in the frames between while
+        // its neighbours move, and where it meets them the picture opens. Excitebike 64 draws each section of a track
+        // with a matrix of its own that holds the camera, fogged under one render mode past a distance and plain under
+        // another nearer, so a section that crossed the distance stood still in the frames between, and as the camera
+        // pitched over a crest the background colour showed between it and the next in a light line across the track
+        // and up the canyon walls, for a frame at a time. A mesh the scene drew more than once among the leftovers on
+        // either side tells one object from another no better than the calls did, and is left as it was.
+        {
+            thread_local std::vector<std::pair<uint64_t, uint32_t>> curLeftMeshes;
+            thread_local std::vector<std::pair<uint64_t, uint32_t>> prevLeftMeshes;
+            auto collectLeftMeshes = [&](const GameScene &scene, const std::vector<std::pair<uint64_t, GameCallMap>> &callHashMap, uint32_t workloadIndex, bool cur, std::vector<std::pair<uint64_t, uint32_t>> &meshes) {
+                meshes.clear();
+                const Workload &workload = workloadQueue.workloads[workloadIndex];
+                for (const std::pair<uint64_t, GameCallMap> &it : callHashMap) {
+                    const GameCallMap &callMap = it.second;
+                    const GameIndices::Projection &projIndices = scene.projections[callMap.sceneProjIndex];
+                    if (!callMap.doTransformMatching || (projIndices.workloadIndex != workloadIndex)) {
+                        continue;
+                    }
+
+                    const GameCall &call = workload.fbPairs[projIndices.fbPairIndex].projections[projIndices.projectionIndex].gameCalls[callMap.callIndex];
+                    for (uint32_t m = call.callDesc.minWorldMatrix; m <= call.callDesc.maxWorldMatrix; m++) {
+                        const bool paired = cur ? firstCurWorkloadMap.transforms[m].mapped : firstCurWorkloadMap.prevTransformsMapped[m];
+                        const TransformGroup &group = workload.drawData.transformGroups[workload.drawData.worldTransformGroups[m]];
+                        if (paired || (group.matrixId != G_EX_ID_AUTO)) {
+                            continue;
+                        }
+
+                        const uint64_t mesh = transformMesh(workload.drawData, m);
+                        if (mesh != 0) {
+                            meshes.emplace_back(mesh, m);
+                        }
+                    }
+                }
+
+                std::sort(meshes.begin(), meshes.end());
+                meshes.erase(std::unique(meshes.begin(), meshes.end()), meshes.end());
+            };
+
+            collectLeftMeshes(curScene, curCallHashMap, firstCurProjIndices.workloadIndex, true, curLeftMeshes);
+            collectLeftMeshes(prevScene, prevCallHashMap, firstPrevProjIndices.workloadIndex, false, prevLeftMeshes);
+            auto meshEnd = [](const std::vector<std::pair<uint64_t, uint32_t>> &meshes, size_t i) {
+                size_t j = i;
+                while ((j < meshes.size()) && (meshes[j].first == meshes[i].first)) {
+                    j++;
+                }
+
+                return j;
+            };
+
+            size_t c = 0;
+            size_t p = 0;
+            while ((c < curLeftMeshes.size()) && (p < prevLeftMeshes.size())) {
+                if (curLeftMeshes[c].first < prevLeftMeshes[p].first) {
+                    c = meshEnd(curLeftMeshes, c);
+                }
+                else if (curLeftMeshes[c].first > prevLeftMeshes[p].first) {
+                    p = meshEnd(prevLeftMeshes, p);
+                }
+                else {
+                    const size_t cEnd = meshEnd(curLeftMeshes, c);
+                    const size_t pEnd = meshEnd(prevLeftMeshes, p);
+                    if (((cEnd - c) == 1) && ((pEnd - p) == 1)) {
+                        // Only what pairs any two transforms holds here too: not across a mirror, nor a collapse.
+                        const uint32_t curIndex = curLeftMeshes[c].second;
+                        const uint32_t prevIndex = prevLeftMeshes[p].second;
+                        const TransformMatchResult matchResult = computeTransformMatch(firstCurWorkload.drawData.worldTransforms[curIndex], firstCurViewProj,
+                            firstPrevWorkload.drawData.worldTransforms[prevIndex], firstPrevViewProj, nullptr);
+                        if (matchResult.valid) {
+                            matchTransform(firstCurWorkload, firstPrevWorkload, firstCurWorkloadMap, firstPrevWorkloadMap, curIndex, prevIndex, modifiedBuffers);
+                        }
+                    }
+
+                    c = cEnd;
+                    p = pEnd;
+                }
+            }
+        }
+#endif
 
         if (!modifiedBuffers.empty()) {
             workloadsModified[firstCurProjIndices.workloadIndex].merge(modifiedBuffers);
