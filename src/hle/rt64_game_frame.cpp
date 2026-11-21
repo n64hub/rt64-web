@@ -4,6 +4,9 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 
 #include "common/rt64_math.h"
 
@@ -2379,6 +2382,19 @@ namespace RT64 {
             }
 
             const bool stepMoves = stepByPlace ? (stepFromIdentity >= (StepTolerance * 0.1f)) : (agreed && (stepMiss(Identity, bestIndex) >= (StepTolerance * 0.1f)));
+            {
+                // TEST (not for merge): the step's jump check.
+                static const bool stepLog = (getenv("RT64_TEST_STEP_LOG") != nullptr);
+                if (stepLog) {
+                    const uint64_t ms = uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+                    uint32_t unpaired = 0;
+                    for (uint32_t m : sceneTransforms) {
+                        unpaired += firstCurWorkloadMap.transforms[m].mapped ? 0 : 1;
+                    }
+
+                    fprintf(stderr, "STEPLOG2 %llu len %.4f prev %.4f agreed %d jumped %d paired %u best %u unpaired %u place %d\n", (unsigned long long)ms, stepLength, prevStepLength, agreed ? 1 : 0, jumped ? 1 : 0, pairedCount, bestCount, unpaired, stepByPlace ? 1 : 0);
+                }
+            }
             if (agreed && !jumped && stepMoves) {
                 // Drawn as the transform whose step it takes is, from its own pair of matrices; with a step found by place,
                 // as a transform paired with its own matrix moved back by the step.
