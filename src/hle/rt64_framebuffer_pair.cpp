@@ -44,9 +44,6 @@ namespace RT64 {
         depthWrite = false;
         syncRequired = false;
         fillRectOnly = true;
-#   if RT64_HASH_FILLED_FRAMEBUFFERS
-        filledRows = 0;
-#   endif
         ditherPatterns.fill(0);
         scissorRect.reset();
         startFbDiscards.clear();
@@ -55,6 +52,9 @@ namespace RT64 {
         drawColorRect.reset();
         viewportRect.reset();
         drawDepthRect.reset();
+#   if RT64_HASH_FILLED_FRAMEBUFFERS
+        filledRows = 0;
+#   endif
     }
 
     void FramebufferPair::addGameCall(const GameCall &gameCall) {
