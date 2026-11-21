@@ -2281,15 +2281,107 @@ namespace RT64 {
             }
 
             const hlslpp::float4x4 Identity(1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
-            const bool agreed = (bestIndex != UINT32_MAX) && (bestCount >= 3) && ((bestCount * 2) > pairedCount);
+            bool agreed = (bestIndex != UINT32_MAX) && (bestCount >= 3) && ((bestCount * 2) > pairedCount);
+
+            // Where the pairs agree on no step, the step that brings the most of the scene's transforms each onto one of
+            // the frame before's scene's matrices, tried from each of up to 8 of them onto each of the frame before's: a
+            // game that draws its world in blocks of its own making each frame, numbered as each first comes up and with
+            // other vertices under each as the view moves, leaves few of them paired, but each block that stays in view
+            // has its matrix of the frame before at the camera's step from its own. Excitebike 64's Desert draws its
+            // ground as patches under up to 32 blocks, each a matrix of the block's place less the camera's, and its
+            // pairs agreed in a third of the race's frames: the light lines across the dunes stayed in a quarter of the
+            // frames that had them. The step is taken only when it brings more than half the scene's transforms, at
+            // least 3, onto a matrix of the frame before's, and only in a scene of up to 32 on each side, so its cost
+            // stays small.
+            bool stepByPlace = false;
+            if (!agreed) {
+                thread_local std::vector<uint32_t> prevSceneTransforms;
+                prevSceneTransforms.clear();
+                for (const std::pair<uint64_t, GameCallMap> &it : prevCallHashMap) {
+                    const GameCallMap &callMap = it.second;
+                    const GameIndices::Projection &projIndices = prevScene.projections[callMap.sceneProjIndex];
+                    if (!callMap.doTransformMatching || (projIndices.workloadIndex != firstPrevProjIndices.workloadIndex)) {
+                        continue;
+                    }
+
+                    const GameCall &call = firstPrevWorkload.fbPairs[projIndices.fbPairIndex].projections[projIndices.projectionIndex].gameCalls[callMap.callIndex];
+                    for (uint32_t m = call.callDesc.minWorldMatrix; m <= call.callDesc.maxWorldMatrix; m++) {
+                        const TransformGroup &group = prevData.transformGroups[prevData.worldTransformGroups[m]];
+                        if (group.matrixId == G_EX_ID_AUTO) {
+                            prevSceneTransforms.emplace_back(m);
+                        }
+                    }
+                }
+
+                std::sort(prevSceneTransforms.begin(), prevSceneTransforms.end());
+                prevSceneTransforms.erase(std::unique(prevSceneTransforms.begin(), prevSceneTransforms.end()), prevSceneTransforms.end());
+                const uint32_t MaxPlaceTransforms = 32;
+                const uint32_t sceneCount = uint32_t(sceneTransforms.size());
+                if ((sceneCount >= 3) && (sceneCount <= MaxPlaceTransforms) && !prevSceneTransforms.empty() && (prevSceneTransforms.size() <= MaxPlaceTransforms)) {
+                    // How far a step leaves a transform's matrix from the nearest of the frame before's, as stepMiss reads it.
+                    auto placeMiss = [&](const hlslpp::float4x4 &step, uint32_t m) {
+                        const hlslpp::float4x4 moved = hlslpp::mul(hlslpp::float4x4(curData.worldTransforms[m]), step);
+                        float nearest = FLT_MAX;
+                        for (uint32_t q : prevSceneTransforms) {
+                            const hlslpp::float4x4 prev = prevData.worldTransforms[q];
+                            float miss = 0.0f;
+                            float size = 0.0f;
+                            for (int r = 0; r < 4; r++) {
+                                miss = std::max(miss, float(hlslpp::length(moved[r] - prev[r])));
+                                size = std::max(size, float(hlslpp::length(prev[r])));
+                            }
+
+                            if (size > 0.0f) {
+                                nearest = std::min(nearest, miss / size);
+                            }
+                        }
+
+                        return nearest;
+                    };
+
+                    const uint32_t placeTries = std::min(sceneCount, 8U);
+                    uint32_t placeCount = 0;
+                    for (uint32_t t = 0; t < placeTries; t++) {
+                        const uint32_t c = sceneTransforms[(uint64_t(t) * sceneCount) / placeTries];
+                        const hlslpp::float4x4 cur = curData.worldTransforms[c];
+                        if (fabsf(float(hlslpp::determinant(extract3x3(cur)))) < 1e-12f) {
+                            continue;
+                        }
+
+                        const hlslpp::float4x4 inverseCur = hlslpp::inverse(cur);
+                        for (uint32_t q : prevSceneTransforms) {
+                            const hlslpp::float4x4 step = hlslpp::mul(inverseCur, hlslpp::float4x4(prevData.worldTransforms[q]));
+                            uint32_t count = 0;
+                            for (uint32_t m : sceneTransforms) {
+                                count += (placeMiss(step, m) < StepTolerance) ? 1 : 0;
+                            }
+
+                            if (count > placeCount) {
+                                placeCount = count;
+                                bestStep = step;
+                            }
+                        }
+                    }
+
+                    stepByPlace = (placeCount >= 3) && ((placeCount * 2) > sceneCount);
+                    agreed = stepByPlace;
+                }
+            }
+
             const float MaxJumpRatio = 4.0f;
             const float stepLength = agreed ? float(hlslpp::length(hlslpp::float3(bestStep[3].xyz))) : -1.0f;
             const float prevStepLength = (firstPrevWorkloadMap != nullptr) ? firstPrevWorkloadMap->viewProjections[firstPrevProj.transformsIndex].cameraStep : -1.0f;
             const bool jumped = (prevStepLength < 0.0f) || (stepLength > (prevStepLength * MaxJumpRatio));
             firstCurWorkloadMap.viewProjections[firstCurProj.transformsIndex].cameraStep = stepLength;
-            if (agreed && !jumped && (stepMiss(Identity, bestIndex) >= (StepTolerance * 0.1f))) {
-                // Drawn as the transform whose step it takes is, from its own pair of matrices.
-                const RigidBody &stepBody = firstCurWorkloadMap.transforms[bestIndex].rigidBody;
+            float stepFromIdentity = 0.0f;
+            for (int r = 0; r < 4; r++) {
+                stepFromIdentity = std::max(stepFromIdentity, float(hlslpp::length(bestStep[r] - Identity[r])));
+            }
+
+            const bool stepMoves = stepByPlace ? (stepFromIdentity >= (StepTolerance * 0.1f)) : (agreed && (stepMiss(Identity, bestIndex) >= (StepTolerance * 0.1f)));
+            if (agreed && !jumped && stepMoves) {
+                // Drawn as the transform whose step it takes is, from its own pair of matrices; with a step found by place,
+                // as a transform paired with its own matrix moved back by the step.
                 for (uint32_t m : sceneTransforms) {
                     GameFrameMap::TransformMap &transformMap = firstCurWorkloadMap.transforms[m];
                     if (transformMap.mapped) {
@@ -2299,7 +2391,18 @@ namespace RT64 {
                     const hlslpp::float4x4 cur = curData.worldTransforms[m];
                     const hlslpp::float4x4 moved = hlslpp::mul(cur, bestStep);
                     const TransformGroup &group = curData.transformGroups[curData.worldTransformGroups[m]];
-                    transformMap.rigidBody = stepBody;
+                    if (stepByPlace) {
+                        // Moving at the step already, so the step itself reads as no jump.
+                        transformMap.rigidBody = RigidBody();
+                        transformMap.rigidBody.linearVelocity = cur[3].xyz - moved[3].xyz;
+                        transformMap.rigidBody.updateLinear(moved, cur, group.positionInterpolation);
+                        transformMap.rigidBody.updateAngular(moved, cur, group.rotationInterpolation, group.scaleInterpolation, group.skewInterpolation);
+                        transformMap.rigidBody.updatePerspective(moved, cur, group.perspectiveInterpolation);
+                    }
+                    else {
+                        transformMap.rigidBody = firstCurWorkloadMap.transforms[bestIndex].rigidBody;
+                    }
+
                     transformMap.rigidBody.linearVelocity = cur[3].xyz - moved[3].xyz;
                     transformMap.rigidBody.updateDecomposition(moved, group.decompose);
                     transformMap.rigidBody.updateDecomposition(cur, group.decompose);
