@@ -5,6 +5,7 @@
 #include "rt64_rsp.h"
 
 #include <cassert>
+#include <cmath>
 
 #include "../include/rt64_extended_gbi.h"
 #include "common/rt64_common.h"
@@ -754,35 +755,7 @@ namespace RT64 {
         auto &posScreen = workload.drawData.posScreen;
         uint32_t globalIndex = indices[dstIndex];
         if (used[dstIndex]) {
-            auto &posFloats = workload.drawData.posFloats;
-            auto &velFloats = workload.drawData.velFloats;
-            auto &viewProjIndices = workload.drawData.viewProjIndices;
-            auto &worldIndices = workload.drawData.worldIndices;
-            auto &posTransformed = workload.drawData.posTransformed;
-            const uint32_t newIndex = workload.drawData.vertexCount();
-            posFloats.emplace_back(posFloats[globalIndex * 3 + 0]);
-            posFloats.emplace_back(posFloats[globalIndex * 3 + 1]);
-            posFloats.emplace_back(posFloats[globalIndex * 3 + 2]);
-            velFloats.emplace_back(velFloats[globalIndex * 3 + 0]);
-            velFloats.emplace_back(velFloats[globalIndex * 3 + 1]);
-            velFloats.emplace_back(velFloats[globalIndex * 3 + 2]);
-            normColBytes.emplace_back(normColBytes[globalIndex * 4 + 0]);
-            normColBytes.emplace_back(normColBytes[globalIndex * 4 + 1]);
-            normColBytes.emplace_back(normColBytes[globalIndex * 4 + 2]);
-            normColBytes.emplace_back(normColBytes[globalIndex * 4 + 3]);
-            tcFloats.emplace_back(tcFloats[globalIndex * 2 + 0]);
-            tcFloats.emplace_back(tcFloats[globalIndex * 2 + 1]);
-            tcVelFloats.emplace_back(tcVelFloats[globalIndex * 2 + 0]);
-            tcVelFloats.emplace_back(tcVelFloats[globalIndex * 2 + 1]);
-            viewProjIndices.emplace_back(viewProjIndices[globalIndex]);
-            worldIndices.emplace_back(worldIndices[globalIndex]);
-            fogIndices.emplace_back(fogIndices[globalIndex]);
-            lightIndices.emplace_back(lightIndices[globalIndex]);
-            lightCounts.emplace_back(lightCounts[globalIndex]);
-            lookAtIndices.emplace_back(lookAtIndices[globalIndex]);
-            posTransformed.emplace_back(posTransformed[globalIndex]);
-            posScreen.emplace_back(posScreen[globalIndex]);
-            indices[dstIndex] = newIndex;
+            indices[dstIndex] = copyVertex(globalIndex);
             used[dstIndex] = false;
             globalIndex = indices[dstIndex];
         }
@@ -808,8 +781,8 @@ namespace RT64 {
             break;
         }
         case G_MWO_POINT_XYSCREEN: {
-            // First bit being 0 indicates it should modify only XY.
-            modifyPosUints.emplace_back(globalIndex << 1);
+            // The low two bits say what it modifies: 0 is only XY, 1 only Z, 2 a line's corner (drawLine).
+            modifyPosUints.emplace_back(globalIndex << 2);
             modifyPosUints.emplace_back(value);
 
             // We decode on the CPU anyway for draw area tracking and the debugger.
@@ -820,8 +793,8 @@ namespace RT64 {
             break;
         }
         case G_MWO_POINT_ZSCREEN: {
-            // First bit being 1 indicates it should modify only Z.
-            modifyPosUints.emplace_back((globalIndex << 1) | 0x1);
+            // The low two bits say what it modifies: 1 is only Z.
+            modifyPosUints.emplace_back((globalIndex << 2) | 0x1);
             modifyPosUints.emplace_back(value);
 
             // We decode on the CPU anyway for depth tracking, branchZ and the debugger.
@@ -1275,6 +1248,113 @@ namespace RT64 {
     void RSP::drawIndexedTri(uint32_t a, uint32_t b, uint32_t c) {
         drawIndexedTri(a, b, c, false);
     }
+
+    uint32_t RSP::copyVertex(uint32_t globalIndex) {
+        // A new vertex with every attribute of the one at globalIndex, for work that changes one already used in the frame.
+        const int workloadCursor = state->ext.workloadQueue->writeCursor;
+        Workload &workload = state->ext.workloadQueue->workloads[workloadCursor];
+        auto &drawData = workload.drawData;
+        const uint32_t newIndex = drawData.vertexCount();
+        for (int i = 0; i < 3; i++) {
+            drawData.posFloats.emplace_back(drawData.posFloats[globalIndex * 3 + i]);
+        }
+
+        for (int i = 0; i < 3; i++) {
+            drawData.velFloats.emplace_back(drawData.velFloats[globalIndex * 3 + i]);
+        }
+
+        for (int i = 0; i < 4; i++) {
+            drawData.normColBytes.emplace_back(drawData.normColBytes[globalIndex * 4 + i]);
+        }
+
+        for (int i = 0; i < 2; i++) {
+            drawData.tcFloats.emplace_back(drawData.tcFloats[globalIndex * 2 + i]);
+        }
+
+        for (int i = 0; i < 2; i++) {
+            drawData.tcVelFloats.emplace_back(drawData.tcVelFloats[globalIndex * 2 + i]);
+        }
+
+        drawData.viewProjIndices.emplace_back(drawData.viewProjIndices[globalIndex]);
+        drawData.worldIndices.emplace_back(drawData.worldIndices[globalIndex]);
+        drawData.fogIndices.emplace_back(drawData.fogIndices[globalIndex]);
+        drawData.lightIndices.emplace_back(drawData.lightIndices[globalIndex]);
+        drawData.lightCounts.emplace_back(drawData.lightCounts[globalIndex]);
+        drawData.lookAtIndices.emplace_back(drawData.lookAtIndices[globalIndex]);
+        drawData.posTransformed.emplace_back(drawData.posTransformed[globalIndex]);
+        drawData.posScreen.emplace_back(drawData.posScreen[globalIndex]);
+        return newIndex;
+    }
+
+#if RT64_DRAW_LINES
+    void RSP::drawLine(uint32_t a, uint32_t b, uint32_t width) {
+        // RT64_DRAW_LINES: the line microcode's G_LINE3D (L3DEX2's, and F3DEX2's opcode for it), which RT64 left undrawn.
+        // The RSP draws a line between two loaded vertices as a quad on the screen, 1.5 pixels wide and half a pixel more
+        // for each step of its width, in the vertices' colours and depths, never culled. Here each end is copied twice and
+        // the copies are moved apart across the line on the GPU, after the vertices are placed (RSPModifyCS), so the quad
+        // follows its ends wherever a frame puts them: in a picture wider than 4:3 and in the frames between the game's.
+        // Mario Party 3 draws Hand Line and Sinker's fishing line and the rings round M.P.I.Q.'s mushroom stalks with it.
+        if ((a >= RSP_MAX_VERTICES) || (b >= RSP_MAX_VERTICES)) {
+            assert(false && "Vertex index is not valid. DL is possibly corrupted.");
+            return;
+        }
+
+        const int workloadCursor = state->ext.workloadQueue->writeCursor;
+        Workload &workload = state->ext.workloadQueue->workloads[workloadCursor];
+        const uint32_t ends[2] = { indices[a], indices[b] };
+        used[a] = used[b] = true;
+
+        // The same corners on the CPU's positions, for the draw area tracking and the debugger.
+        const float halfWidth = (1.5f + float(width & 0xFF) * 0.5f) * 0.5f;
+        const hlslpp::float3 s0 = workload.drawData.posScreen[ends[0]];
+        const hlslpp::float3 s1 = workload.drawData.posScreen[ends[1]];
+        const float dx = float(s1[0]) - float(s0[0]);
+        const float dy = float(s1[1]) - float(s0[1]);
+        const float length = std::sqrt(dx * dx + dy * dy);
+        float nx = 0.0f;
+        float ny = 0.0f;
+        if (length > 0.0f) {
+            nx = -dy / length;
+            ny = dx / length;
+        }
+
+        // Corner c is end c >> 1 moved to side c & 1. Its modify holds the other end's vertex, the side and the width. The
+        // far end measures the line the other way round, so the GPU's side is swapped there to keep each side's corners
+        // on one side.
+        uint32_t corners[4];
+        for (uint32_t c = 0; c < 4; c++) {
+            const uint32_t end = c >> 1;
+            const uint32_t side = c & 1;
+            const uint32_t gpuSide = side ^ end;
+            const uint32_t other = ends[end ^ 1];
+            assert((other < (1U << 23)) && "Too many vertices for a line's modify.");
+            corners[c] = copyVertex(ends[end]);
+            workload.drawData.modifyPosUints.emplace_back((corners[c] << 2) | 0x2);
+            workload.drawData.modifyPosUints.emplace_back((other << 9) | (gpuSide << 8) | (width & 0xFF));
+
+            const float sign = (side != 0) ? 1.0f : -1.0f;
+            hlslpp::float3 &corner = workload.drawData.posScreen[corners[c]];
+            corner[0] = float(corner[0]) + nx * sign * halfWidth;
+            corner[1] = float(corner[1]) + ny * sign * halfWidth;
+        }
+
+        // The line microcode doesn't cull a line, and a quad drawn under culling would lose a winding.
+        uint32_t &geometryMode = geometryModeStack[geometryModeStackSize - 1];
+        const uint32_t previousMode = geometryMode;
+        if ((geometryMode & cullBothMask) != 0) {
+            geometryMode &= ~cullBothMask;
+            state->updateDrawStatusAttribute(DrawAttribute::GeometryMode);
+        }
+
+        drawIndexedTri(corners[0], corners[2], corners[3], true);
+        drawIndexedTri(corners[0], corners[3], corners[1], true);
+
+        if (geometryMode != previousMode) {
+            geometryMode = previousMode;
+            state->updateDrawStatusAttribute(DrawAttribute::GeometryMode);
+        }
+    }
+#endif
 
     void RSP::setViewportAlign(uint16_t ori, int16_t offx, int16_t offy) {
         extended.global.viewportOrigin = ori;

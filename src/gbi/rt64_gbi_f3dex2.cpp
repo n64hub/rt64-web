@@ -154,7 +154,9 @@ namespace RT64 {
         }
 
         void line3D(State *state, DisplayList **dl) {
-            // TODO
+#       if RT64_DRAW_LINES
+            state->rsp->drawLine((*dl)->p0(17, 7), (*dl)->p0(9, 7), (*dl)->p0(0, 8));
+#       endif
         }
 
         void reset(State *state) {

@@ -778,10 +778,10 @@ namespace RT64 {
         if ((modifyCount > 0) && ImGui::CollapsingHeader("Modify")) {
             ImGui::Indent();
             for (size_t m = 0; m < modifyCount; m++) {
-                const bool modifyZ = drawData.modifyPosUints[m * 2] & 0x1;
-                const uint32_t modifyIndex = drawData.modifyPosUints[m * 2] >> 1;
+                const uint32_t modifyKind = drawData.modifyPosUints[m * 2] & 0x3;
+                const uint32_t modifyIndex = drawData.modifyPosUints[m * 2] >> 2;
                 const uint32_t modifyValue = drawData.modifyPosUints[m * 2 + 1];
-                ImGui::Text(modifyZ ? "Modify Z" : "Modify XY");
+                ImGui::Text((modifyKind == 2) ? "Line corner" : ((modifyKind == 1) ? "Modify Z" : "Modify XY"));
                 ImGui::SameLine();
                 ImGui::Text("#%u: %u (Raw value)", modifyIndex, modifyValue);
             }
