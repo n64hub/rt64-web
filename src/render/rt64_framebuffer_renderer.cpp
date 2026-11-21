@@ -9,7 +9,6 @@
 #include "common/rt64_elapsed_timer.h"
 #include "common/rt64_math.h"
 #include "hle/rt64_color_converter.h"
-#include "hle/rt64_frame_dump.h"
 #include "gbi/rt64_f3d.h"
 #include "shared/rt64_framebuffer_params.h"
 #include "shared/rt64_raster_params.h"
@@ -49,6 +48,9 @@ namespace interop {
         float2 TexelSize;
     };
 };
+
+// RT64_FRAME_DUMP's draws.bin, apart from the includes above, which games' own changes to RT64 change.
+#include "hle/rt64_frame_dump.h"
 
 namespace RT64 {
     // Helper functions.
