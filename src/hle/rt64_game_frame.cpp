@@ -2195,7 +2195,8 @@ namespace RT64 {
         // that came into view at the picture's side, stood still in the frames between, and the background colour showed
         // between it and the next in a light line across the track and up the canyon walls, for a frame at a time. A game
         // whose camera is in the projection leaves what holds still at the same matrix, so the step is none, and a scene
-        // whose paired transforms agree on no step (a cut, or most of it moving on its own) is left as it was.
+        // whose paired transforms agree on no step, nor most of its transforms by place (below), is left as it was: a
+        // cut, or most of it moving on its own.
         //
         // Nor is anything moved when the step jumped, its eye moving more than 4 times as far as the frame before's step
         // did, or when the frame before's scene agreed on none: a cut too small for the cut check (RT64_SKIP_CAMERA_CUTS)
@@ -2295,9 +2296,12 @@ namespace RT64 {
             // pairs agreed in a third of the race's frames: the light lines across the dunes stayed in a quarter of the
             // frames that had them. The step is taken only when it brings more than half the scene's transforms, at
             // least 3, onto a matrix of the frame before's, and only in a scene of up to 32 on each side, so its cost
-            // stays small.
+            // stays small. Nor is it looked for where more than 3 pairs agreed on no step: those are enough to judge by,
+            // and what they say is that the scene moves on its own, where a step found by place is one between two of
+            // a row of like objects. Excitebike 64's riders lined up at the start, as the camera swept past them, took
+            // a step of one rider's place to the next, and the start's banner was drawn in pieces in the frames between.
             bool stepByPlace = false;
-            if (!agreed) {
+            if (!agreed && (pairedCount <= 3)) {
                 thread_local std::vector<uint32_t> prevSceneTransforms;
                 prevSceneTransforms.clear();
                 for (const std::pair<uint64_t, GameCallMap> &it : prevCallHashMap) {
