@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdio>
 
 #include "../include/rt64_extended_gbi.h"
 #include "common/rt64_common.h"
@@ -1303,6 +1304,20 @@ namespace RT64 {
         Workload &workload = state->ext.workloadQueue->workloads[workloadCursor];
         const uint32_t ends[2] = { indices[a], indices[b] };
         used[a] = used[b] = true;
+        {
+            // TEMPORARY: the state lines are drawn under (issue 104's fishing line colour), taken out before merging.
+            static int logged = 0;
+            if (logged < 16) {
+                logged++;
+                const interop::ColorCombiner &cc = state->rdp->colorCombinerStack[state->rdp->colorCombinerStackSize - 1];
+                const uint8_t *c0 = &workload.drawData.normColBytes[ends[0] * 4];
+                const uint8_t *c1 = &workload.drawData.normColBytes[ends[1] * 4];
+                fprintf(stderr, "LINE3D geo=%08X cc=%08X:%08X om=%08X:%08X tex=%u tile=%u w=%u c0=%u,%u,%u,%u c1=%u,%u,%u,%u
+",
+                    geometryModeStack[geometryModeStackSize - 1], cc.H, cc.L, state->rdp->otherMode.H, state->rdp->otherMode.L,
+                    textureState.on, textureState.tile, width, c0[0], c0[1], c0[2], c0[3], c1[0], c1[1], c1[2], c1[3]);
+            }
+        }
 
         // The same corners on the CPU's positions, for the draw area tracking and the debugger.
         const float halfWidth = (1.5f + float(width & 0xFF) * 0.5f) * 0.5f;
