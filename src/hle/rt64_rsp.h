@@ -276,6 +276,10 @@ namespace RT64 {
         void setLightCount(uint8_t count);
         void setClipRatioEdge(uint8_t index, int16_t value);
         void setClipRatioAll(int16_t value);
+        uint32_t copyVertex(uint32_t globalIndex);
+#   if RT64_DRAW_LINES
+        void drawLine(uint32_t a, uint32_t b, uint32_t width);
+#   endif
         void setPerspNorm(uint32_t perspNorm);
         void setLookAt(uint8_t index, uint32_t address);
         void setLookAtVectors(interop::float3 x, interop::float3 y);
@@ -293,10 +297,6 @@ namespace RT64 {
         void setTextureImage(uint8_t fmt, uint8_t siz, uint16_t width, uint32_t segAddress);
         void drawIndexedTri(uint32_t a, uint32_t b, uint32_t c, bool rawGlobalIndices);
         void drawIndexedTri(uint32_t a, uint32_t b, uint32_t c);
-        uint32_t copyVertex(uint32_t globalIndex);
-#   if RT64_DRAW_LINES
-        void drawLine(uint32_t a, uint32_t b, uint32_t width);
-#   endif
         void setViewportAlign(uint16_t ori, int16_t offx, int16_t offy);
         void vertexTestZ(uint8_t vtxIndex);
         void endVertexTestZ();
