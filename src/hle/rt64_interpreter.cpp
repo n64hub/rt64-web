@@ -5,6 +5,7 @@
 #include "rt64_interpreter.h"
 
 #include <cassert>
+#include <cstdio>
 
 //#define DUMP_DISPLAY_LISTS
 
@@ -41,6 +42,14 @@ namespace RT64 {
             UCode.dataAddress = maskedDataAddress;
         }
 
+        {
+            // TEMPORARY: issue 104, taken out before merging.
+            static int loggedLoads = 0;
+            static uint32_t loggedText = 0;
+            const bool logThis = !resetFromTask || (loggedText != maskedTextAddress);
+            loggedText = maskedTextAddress;
+            if (logThis && (loggedLoads < 200)) { loggedLoads++; fprintf(stderr, "UCODE text=%06X data=%06X fromTask=%d geo=%08X\n", maskedTextAddress, maskedDataAddress, int(resetFromTask), state->rsp->geometryModeStack[state->rsp->geometryModeStackSize - 1]); }
+        }
         if (hleGBI != nullptr) {
             GBIReset resetFunction = resetFromTask ? hleGBI->resetFromTask : hleGBI->resetFromLoad;
             if (resetFunction != nullptr) {

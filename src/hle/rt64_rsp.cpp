@@ -1315,6 +1315,7 @@ namespace RT64 {
                 fprintf(stderr, "LINE3D geo=%08X cc=%08X:%08X om=%08X:%08X tex=%u tile=%u w=%u c0=%u,%u,%u,%u c1=%u,%u,%u,%u\n",
                     geometryModeStack[geometryModeStackSize - 1], cc.H, cc.L, state->rdp->otherMode.H, state->rdp->otherMode.L,
                     textureState.on, textureState.tile, width, c0[0], c0[1], c0[2], c0[3], c1[0], c1[1], c1[2], c1[3]);
+                fprintf(stderr, "LINE3D lights=%d %s\n", lightCount, [&]() { static char t[512]; int n = 0; for (int l = 0; l <= lightCount && l < RSP_MAX_LIGHTS + 1; l++) { n += snprintf(t + n, sizeof(t) - n, "[%u,%u,%u d%d,%d,%d] ", lights[l].dir.colr, lights[l].dir.colg, lights[l].dir.colb, lights[l].dir.dirx, lights[l].dir.diry, lights[l].dir.dirz); } return (const char *)(t); }());
             }
         }
 
