@@ -1592,6 +1592,7 @@ namespace RT64 {
             GameFrameMap::WorkloadMap &workloadMap = frameMap.workloads[curWorkloadIndex];
             workloadMap.prevWorkloadIndex = drawnPair.second;
             workloadMap.mapped = true;
+            workloadMap.cameraCut = false;
 
             Workload &curWorkload = workloadQueue.workloads[curWorkloadIndex];
             const Workload &prevWorkload = workloadQueue.workloads[workloadMap.prevWorkloadIndex];
@@ -1763,9 +1764,14 @@ namespace RT64 {
         }
 
         // The rects pair last: none of their tiles is one matchScene() maps, and tileInterpolationUsed is read once
-        // match() returns.
+        // match() returns. A workload whose camera cut to another shot (RT64_SKIP_CAMERA_CUTS) pairs none: its rects
+        // are drawn where the game put them, as its scene is.
 #if RT64_INTERPOLATE_RECT_SCROLLS
         for (const std::pair<uint32_t, uint32_t> &drawnPair : drawnPairs) {
+            if (frameMap.workloads[drawnPair.first].cameraCut) {
+                continue;
+            }
+
             matchRectScrolls(workloadQueue.workloads[drawnPair.first], workloadQueue.workloads[drawnPair.second], frameMap.workloads[drawnPair.first], tileInterpolationUsed, false);
             matchRectScrolls(workloadQueue.workloads[drawnPair.first], workloadQueue.workloads[drawnPair.second], frameMap.workloads[drawnPair.first], tileInterpolationUsed, true);
         }
@@ -1880,6 +1886,7 @@ namespace RT64 {
                             if (isCameraCut(move.turnCosine, move.step, prevEyeStep)) {
                                 viewProjMap.mapped = false;
                                 viewProjMap.rigidBody = RigidBody();
+                                firstCurWorkloadMap.cameraCut = true;
                                 return;
                             }
 
@@ -2116,6 +2123,7 @@ namespace RT64 {
                     curViewProjMap.rigidBody = RigidBody();
                 }
 
+                firstCurWorkloadMap.cameraCut = true;
                 return;
             }
         }

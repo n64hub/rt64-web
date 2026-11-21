@@ -119,6 +119,10 @@ namespace RT64 {
             std::vector<bool> prevLookAtMapped;
             uint32_t prevWorkloadIndex = 0;
             bool mapped = false;
+
+            // RT64_SKIP_CAMERA_CUTS: a camera of the workload's cut to another shot (isCameraCut()), so its rects pair
+            // with none of the frame before either.
+            bool cameraCut = false;
         };
 
         std::vector<WorkloadMap> workloads;
