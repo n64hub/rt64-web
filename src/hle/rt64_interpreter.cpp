@@ -5,12 +5,8 @@
 #include "rt64_interpreter.h"
 
 #include <cassert>
-#include <cstdio>
 
 //#define DUMP_DISPLAY_LISTS
-
-uint32_t issue104Ring[96][2]; // TEMPORARY: issue 104, taken out before merging.
-uint32_t issue104RingPos = 0;
 
 namespace RT64 {
     static FILE *displayListFp = nullptr;
@@ -195,9 +191,6 @@ namespace RT64 {
                     }
                 }
 
-                issue104Ring[issue104RingPos % 96][0] = dl->w0; // TEMPORARY: issue 104, taken out before merging.
-                issue104Ring[issue104RingPos % 96][1] = dl->w1;
-                issue104RingPos++;
                 if (func != nullptr) {
                     func(state, &dl);
                 }

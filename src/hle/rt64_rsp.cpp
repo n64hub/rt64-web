@@ -6,7 +6,6 @@
 
 #include <cassert>
 #include <cmath>
-#include <cstdio>
 
 #include "../include/rt64_extended_gbi.h"
 #include "common/rt64_common.h"
@@ -18,9 +17,6 @@
 #include "rt64_state.h"
 
 //#define LOG_SPECIAL_MATRIX_OPERATIONS
-
-extern uint32_t issue104Ring[96][2]; // TEMPORARY: issue 104, taken out before merging.
-extern uint32_t issue104RingPos;
 
 namespace RT64 {
     // RSP
@@ -1294,7 +1290,7 @@ namespace RT64 {
     void RSP::drawLine(uint32_t a, uint32_t b, uint32_t width) {
         // RT64_DRAW_LINES: the line microcode's G_LINE3D (L3DEX2's, and F3DEX2's opcode for it), which RT64 left undrawn.
         // The RSP draws a line between two loaded vertices as a quad on the screen, 1.5 pixels wide and half a pixel more
-        // for each step of its width, in the vertices' colours and depths, never culled. Here each end is copied twice and
+        // for each step of its width, in the vertices' colours and depths, unlit, never culled. Here each end is copied twice and
         // the copies are moved apart across the line on the GPU, after the vertices are placed (RSPModifyCS), so the quad
         // follows its ends wherever a frame puts them: in a picture wider than 4:3 and in the frames between the game's.
         // Mario Party 3 draws Hand Line and Sinker's fishing line and the rings round M.P.I.Q.'s mushroom stalks with it.
@@ -1307,21 +1303,6 @@ namespace RT64 {
         Workload &workload = state->ext.workloadQueue->workloads[workloadCursor];
         const uint32_t ends[2] = { indices[a], indices[b] };
         used[a] = used[b] = true;
-        {
-            // TEMPORARY: the state lines are drawn under (issue 104's fishing line colour), taken out before merging.
-            static int logged = 0;
-            if (logged < 16) {
-                logged++;
-                const interop::ColorCombiner &cc = state->rdp->colorCombinerStack[state->rdp->colorCombinerStackSize - 1];
-                const uint8_t *c0 = &workload.drawData.normColBytes[ends[0] * 4];
-                const uint8_t *c1 = &workload.drawData.normColBytes[ends[1] * 4];
-                fprintf(stderr, "LINE3D geo=%08X cc=%08X:%08X om=%08X:%08X tex=%u tile=%u w=%u c0=%u,%u,%u,%u c1=%u,%u,%u,%u\n",
-                    geometryModeStack[geometryModeStackSize - 1], cc.H, cc.L, state->rdp->otherMode.H, state->rdp->otherMode.L,
-                    textureState.on, textureState.tile, width, c0[0], c0[1], c0[2], c0[3], c1[0], c1[1], c1[2], c1[3]);
-                if (logged == 1) { for (uint32_t r = 0; r < 96; r++) { const uint32_t k = (issue104RingPos + r) % 96; fprintf(stderr, "DL %08X %08X\n", issue104Ring[k][0], issue104Ring[k][1]); } }
-                fprintf(stderr, "LINE3D lights=%d %s\n", lightCount, [&]() { static char t[512]; int n = 0; for (int l = 0; l <= lightCount && l < RSP_MAX_LIGHTS + 1; l++) { n += snprintf(t + n, sizeof(t) - n, "[%u,%u,%u d%d,%d,%d] ", lights[l].dir.colr, lights[l].dir.colg, lights[l].dir.colb, lights[l].dir.dirx, lights[l].dir.diry, lights[l].dir.dirz); } return (const char *)(t); }());
-            }
-        }
 
         // The same corners on the CPU's positions, for the draw area tracking and the debugger.
         const float halfWidth = (1.5f + float(width & 0xFF) * 0.5f) * 0.5f;
@@ -1348,6 +1329,11 @@ namespace RT64 {
             const uint32_t other = ends[end ^ 1];
             assert((other < (1U << 23)) && "Too many vertices for a line's modify.");
             corners[c] = copyVertex(ends[end]);
+
+            // The line microcode doesn't light a line's vertices: Mario Party 3 loads its fishing line's with white in their
+            // colour bytes and leaves G_LIGHTING on from the rod, and the console draws the line white (issue 104's
+            // reference), where lit from those bytes as normals it would be the scene's ambient, a dark grey-blue.
+            workload.drawData.lightCounts[corners[c]] = 0;
             workload.drawData.modifyPosUints.emplace_back((corners[c] << 2) | 0x2);
             workload.drawData.modifyPosUints.emplace_back((other << 9) | (gpuSide << 8) | (width & 0xFF));
 
