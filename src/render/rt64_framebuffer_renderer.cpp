@@ -10,14 +10,12 @@
 #include "common/rt64_math.h"
 #include "hle/rt64_color_converter.h"
 #include "gbi/rt64_f3d.h"
+#include "hle/rt64_frame_dump.h"
 #include "shared/rt64_framebuffer_params.h"
 #include "shared/rt64_raster_params.h"
 
 #include "rt64_descriptor_sets.h"
 #include "rt64_render_worker.h"
-
-// RT64_FRAME_DUMP's draws.bin, apart from the lines around it, which games' own changes to RT64 change.
-#include "hle/rt64_frame_dump.h"
 
 // TODO: Move to shared.
 
@@ -1905,16 +1903,6 @@ namespace RT64 {
                     }
                 }
 
-                // RT64_FRAME_DUMP's draws.bin: a fill rect, where it clears. Here, past the lines that place it, which games'
-                // own changes to RT64 change.
-                FrameDump *frameDump = FrameDump::get();
-                if ((frameDump != nullptr) && (instanceDrawCall.type == InstanceDrawCall::Type::FillRect)) {
-                    const RenderRect &fillRect = instanceDrawCall.clearRect.rect;
-                    frameDump->addDraw(*p.curWorkload, p.fbPairIndex, proj, call, 'F', fillRect.left, fillRect.top, fillRect.right, fillRect.bottom, 1.0f, 1.0f,
-                        0.0f, 0.0f, framebuffer.viewport.width, framebuffer.viewport.height, float(p.resolutionScale.x), float(p.resolutionScale.y), p.fbWidth,
-                        p.fbHeight, aspectRatioScale);
-                }
-
                 // Determine to use the draw call either in the RT scene or the raster scene.
                 const uint32_t instanceIndex = static_cast<uint32_t>(instanceDrawCallVector.size());
 #           if RT_ENABLED
@@ -1972,6 +1960,16 @@ namespace RT64 {
 #           endif
                 {
                     rasterScene.instanceIndices.push_back(instanceIndex);
+                }
+
+                // RT64_FRAME_DUMP's draws.bin: a fill rect, where it clears. Here, once the lines before have placed it and put it in a
+                // scene, which games' own changes to RT64 change.
+                FrameDump *frameDump = FrameDump::get();
+                if ((frameDump != nullptr) && (instanceDrawCall.type == InstanceDrawCall::Type::FillRect)) {
+                    const RenderRect &fillRect = instanceDrawCall.clearRect.rect;
+                    frameDump->addDraw(*p.curWorkload, p.fbPairIndex, proj, call, 'F', fillRect.left, fillRect.top, fillRect.right, fillRect.bottom, 1.0f, 1.0f,
+                        0.0f, 0.0f, framebuffer.viewport.width, framebuffer.viewport.height, float(p.resolutionScale.x), float(p.resolutionScale.y), p.fbWidth,
+                        p.fbHeight, aspectRatioScale);
                 }
 
                 instanceDrawCallVector.push_back(instanceDrawCall);

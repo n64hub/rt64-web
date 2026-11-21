@@ -214,12 +214,12 @@ namespace RT64 {
         }
     }
 
-    void FrameDump::addRenderedFrame(uint32_t frame, float weight) {
+    void FrameDump::addRenderedFrame(float weight) {
         if (!drawsOn) {
             return;
         }
 
-        appendLine(drawsText, "R\t%u\t%u\t%.4f\n", drawsRendered++, frame, weight);
+        appendLine(drawsText, "R\t%u\t%.4f\n", drawsRendered++, weight);
         drawsFbWorkload = nullptr;
     }
 

@@ -582,6 +582,13 @@ namespace RT64 {
 
         rendererCPUProfiler.start();
 
+        // RT64_FRAME_DUMP's draws.bin: the frame drawn now, which the framebuffer renderer's draws go under. Here, apart
+        // from the lines around the call that draws it, which games' own changes to RT64 change.
+        FrameDump *frameDump = FrameDump::get();
+        if (frameDump != nullptr) {
+            frameDump->addRenderedFrame(curFrameWeight);
+        }
+
         const bool aspectRatioAdjustment = (abs(workloadConfig.aspectRatioScale - 1.0f) > 1e-6f);
         const bool processProjections = aspectRatioAdjustment || prevFrame.matched|| curFrame.isDebuggerCameraEnabled(*this);
         bool uploadProjections = false;
@@ -1634,12 +1641,6 @@ namespace RT64 {
                     else {
                         prevFrameWeight = 0.0f;
                         curFrameWeight = 1.0f;
-                    }
-
-                    // RT64_FRAME_DUMP's draws.bin: the frame drawn next, which the framebuffer renderer's draws go under. Here,
-                    // apart from the lines before the frame is drawn, which games' own changes to RT64 change.
-                    if (frameDump != nullptr) {
-                        frameDump->addRenderedFrame(frame, curFrameWeight);
                     }
 
                     const bool uploadExtras = (frame == 0) && workloadConfig.raytracingEnabled;

@@ -44,8 +44,8 @@
 //       copy, s synced> <the first tile paired: 1/0> <rect move, how far the frame before drew each edge from where
 //       this one does, ulx,uly,lrx,lry in the game's pixels, or -> <the game's rect, ulx,uly,lrx,lry, or ->: each
 //       call as GameFrame::match() paired it, type P perspective, O orthographic, R rect, F fill rect, T triangles.
-//     R <rendered frame> <its loop frame> <weight>: each frame drawn from the game frame, the game's own and each one
-//       between, in the order presented: a present's frame i is the game frame's rendered frame i (presents.tsv).
+//     R <rendered frame> <weight>: each frame drawn from the game frame, the game's own and each one between, in the
+//       order presented: a present's frame i is the game frame's rendered frame i (presents.tsv).
 //     B <workload id> <fb pair> <color image's address> <target width> <target height> <picture width> <picture height>:
 //       a framebuffer pair drawn, the picture its color image at the resolution scale, the box from the target's top
 //       left the VI shows (a target is kept at the largest size drawn), and
@@ -426,7 +426,7 @@ namespace RT64 {
         // screen scale and offset its vertices are drawn with (InstanceDrawCall's triangles), the target's size, the
         // resolution scale and the color image's size in the game's pixels, and the widescreen aspect.
         void addGameFrame(const WorkloadQueue &workloadQueue, const GameFrame &curFrame);
-        void addRenderedFrame(uint32_t frame, float weight);
+        void addRenderedFrame(float weight);
         void addDraw(const Workload &workload, uint32_t fbPairIndex, const Projection &proj, const GameCall &call, char type,
             int32_t left, int32_t top, int32_t right, int32_t bottom, float scaleX, float scaleY, float offsetX, float offsetY,
             float targetWidth, float targetHeight, float resolutionScaleX, float resolutionScaleY, uint32_t colorWidth, uint32_t colorHeight,
