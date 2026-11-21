@@ -746,6 +746,11 @@ namespace RT64 {
     // 64 columns as high as the screen) paired each column with the one that had its alpha a game frame before, up to
     // the screen's height away, and the frames between slid the columns from there, a strip of the picture uncovered
     // where the ramp met the black.
+    // A textured rect whose texture jumped as it changed size or moved half of itself along its row, where the frame
+    // before drew other rects with its look (the glyphs of a font packed into one texture page), is another picture there,
+    // drawn where the game put it, unless the jump is a cut at the scissor's edge (below). So is one that moved along its
+    // row onto the place of a rect nothing paired with while another took the place it left, a line of glyphs whose values
+    // changed.
     static void matchRectScrolls(const Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &workloadMap, bool &tileInterpolationUsed, bool untextured) {
         struct RectCall {
             const DrawCall *call;
@@ -898,6 +903,21 @@ namespace RT64 {
             const bool ulOnto = (aUl <= (vertical ? ca.scissorRect.uly : ca.scissorRect.ulx)) && (ulMove > 0);
             const bool lrOnto = (aLr >= (vertical ? ca.scissorRect.lry : ca.scissorRect.lrx)) && (lrMove < 0);
             return (ulOnto == lrOnto) ? 0 : (ulOnto ? 1 : 2);
+        };
+
+        // Whether the edge the game holds one way (heldEdge) lies on the scissor's, within a pixel: where it cuts a rect
+        // at the screen's edge, as a panorama or a sliding menu goes on past it.
+        auto heldAtScissor = [&](const DrawCall &ca, const DrawCall &cb, bool vertical) {
+            const int held = heldEdge(ca, cb, vertical);
+            if (held == 1) {
+                return (vertical ? ca.gameRect.uly : ca.gameRect.ulx) <= ((vertical ? ca.scissorRect.uly : ca.scissorRect.ulx) + 4);
+            }
+
+            if (held == 2) {
+                return (vertical ? ca.gameRect.lry : ca.gameRect.lrx) >= ((vertical ? ca.scissorRect.lry : ca.scissorRect.lrx) - 4);
+            }
+
+            return false;
         };
 
         // A rect the game cuts at an edge it holds (a strip of a panorama that crosses the top of the picture, held at
@@ -1280,6 +1300,75 @@ namespace RT64 {
             const bool moved = (prevCall.rect.ulx != curCall.rect.ulx) || (prevCall.rect.uly != curCall.rect.uly) ||
                 (prevCall.rect.lrx != curCall.rect.lrx) || (prevCall.rect.lry != curCall.rect.lry);
             if (!moved && (!slides || !scrolled)) {
+                continue;
+            }
+
+            // A rect whose texture jumped (its texcoords moved a quarter of what it spans or more, not a scroll inside
+            // it), where the frame before drew other rects with its look, is another picture of a texture they share,
+            // not this one moved, cut or resized: a glyph of a font the game packs into one texture page with the rest
+            // and draws by its texcoords (Excitebike 64's, its race's times and score one 64x64 page). As the race's
+            // timer counted, a digit paired with the frame before's digit in its place, a glyph of another size, or
+            // with one a cell along the line, and the frames between drew it stretched between the two sizes, slid
+            // across its neighbours, or cut as a panorama's strip is (cutAt), the page's texels sliding through it and
+            // the glyphs beside it in the page showing as columns. A step taken on an axis the rect is cut at the
+            // scissor's edge it holds stays a cut: a strip of a texture several rects share, sliding off the screen.
+            // So does one whose top edge moved, or of its size that moved along its row less than half of it: a sprite
+            // among others that animates by stepping its texcoords across a strip of its frames as it drifts (Mario
+            // Golf's sparkles in its credits), where a line of glyphs keeps its row.
+            bool jumped = false;
+            for (uint32_t t = 0; (t < curCall.tileCount) && !jumped && !untextured; t++) {
+                const interop::RDPTile &tile = curData.rdpTiles[curCall.tileIndex + t];
+                const float jumpS = fabsf(insidePeriod(ds * tile.shifts, tile.masks, tile.cms));
+                const float jumpT = fabsf(insidePeriod(dt * tile.shiftt, tile.maskt, tile.cmt));
+                jumped = (!(cutS && heldAtScissor(curCall, prevCall, false)) && (jumpS > 0.0f) && (jumpS >= (spanS * tile.shifts / 4.0f))) ||
+                    (!(cutT && heldAtScissor(curCall, prevCall, true)) && (jumpT > 0.0f) && (jumpT >= (spanT * tile.shiftt / 4.0f)));
+            }
+
+            const bool movedHalf = (abs(prevCall.gameRect.ulx - curCall.gameRect.ulx) * 2 >= (curCall.gameRect.lrx - curCall.gameRect.ulx));
+            const bool another = jumped && (prevCall.gameRect.uly == curCall.gameRect.uly) && (!sameSize(curCall, prevCall) || movedHalf);
+            bool shared = false;
+            for (size_t k = 0; (k < prevRects.size()) && another && !shared; k++) {
+                shared = (k != found) && sameLook(curCall, *prevRects[k].call);
+            }
+
+            if (shared) {
+                continue;
+            }
+
+            // A textured rect that moved along its row onto most of the place of a rect of that row the frame before
+            // drew at its scale that nothing of this frame paired with, while another rect of this frame at that scale
+            // took most of the place it left, in its row too, is another picture in each place: a line of glyphs whose
+            // values changed, not a glyph moved along it. Excitebike 64 draws its race timer's glyphs page by page, so
+            // as it went from 59.01 to 58.98 the tenths' 9 paired with the seconds' 9 as its own, a glyph and the point
+            // to its left, and the frames between slid it across them. A line that slides pairs the glyphs in the
+            // places its glyphs move onto, all used.
+            auto sameScale = [](const DrawCall &a, const DrawCall &b) {
+                return (a.rectDsdx == b.rectDsdx) && (a.rectDtdy == b.rectDtdy);
+            };
+
+            auto mostOf = [](const DrawCall &a, const DrawCall &b) {
+                const int64_t w = std::min(a.gameRect.lrx, b.gameRect.lrx) - std::max(a.gameRect.ulx, b.gameRect.ulx);
+                const int64_t h = std::min(a.gameRect.lry, b.gameRect.lry) - std::max(a.gameRect.uly, b.gameRect.uly);
+                const int64_t area = int64_t(a.gameRect.lrx - a.gameRect.ulx) * int64_t(a.gameRect.lry - a.gameRect.uly);
+                return (w > 0) && (h > 0) && ((w * h * 2) > area);
+            };
+
+            bool replaced = false;
+            if (moved && !untextured && (prevCall.gameRect.uly == curCall.gameRect.uly)) {
+                bool placeTaken = false;
+                for (size_t k = 0; (k < prevRects.size()) && !placeTaken; k++) {
+                    const DrawCall &placeCall = *prevRects[k].call;
+                    placeTaken = (k != found) && !prevUsed[k] && (placeCall.gameRect.uly == curCall.gameRect.uly) && sameScale(curCall, placeCall) &&
+                        mostOf(curCall, placeCall);
+                }
+
+                for (size_t c = 0; (c < curRects.size()) && placeTaken && !replaced; c++) {
+                    const DrawCall &leftCall = *curRects[c].call;
+                    replaced = (c != r) && (leftCall.gameRect.uly == prevCall.gameRect.uly) && sameScale(leftCall, prevCall) && mostOf(prevCall, leftCall);
+                }
+            }
+
+            if (replaced) {
                 continue;
             }
 
