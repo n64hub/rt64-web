@@ -1248,6 +1248,139 @@ namespace RT64 {
             }
         }
 
+        // A textured rect that moved, with a look the frame before drew more than once (a glyph of a font page), is
+        // left unpaired where its line has at least three times as many rects left unpaired as rects that moved with
+        // it, by the same amount within a pixel: a line of text moves whole, and a glyph paired while most of its line
+        // has no pair is the same letter of other text the frame before drew near it, not this one moved. Excitebike
+        // 64's quit prompt replaces its pause menu in place, and five of the prompt's glyphs paired with the same
+        // letters of the menu's words, less than a glyph away: Really Quit's u with Quit's, 9 pixels higher (1 of its
+        // line's 11 rects moved so, 10 unpaired), and Just's st with Restart's, 5 lower (2 and 8). The frame between
+        // drew those letters halfway from there, the rest of their lines where the game put them. A line here is the
+        // rects of this frame at one scale and of alike size, neither's width or height more than twice the other's,
+        // each overlapping the next by more than half the shorter's height and less than twice the taller's height
+        // apart along the row. Of any size, other rects at the scale of Mario Golf's credits joined their rows into one
+        // line of 160 rects, most unpaired, and 29 glyphs scrolling up together lost their pairs and stepped. A line
+        // that slides pairs most of its rects with the same move, a rect that moves along a row of rects that stay has
+        // no unpaired rect in its line, and a rect that moves with as many unpaired beside it (a strip of the screen's
+        // edge moving a pixel, beside one cut to another size) has fewer than three times as many, so each pairs as
+        // before; so does one whose look the frame before drew once, a picture of its own that no other text could have
+        // drawn. Lines are only found in a frame with both a rect that moved and one left unpaired.
+        bool anyMoved = false;
+        bool anyUnpaired = false;
+        for (size_t r = 0; (r < curRects.size()) && !untextured; r++) {
+            if (curFound[r] == prevRects.size()) {
+                anyUnpaired = true;
+                continue;
+            }
+
+            const DrawCall &curCall = *curRects[r].call;
+            const DrawCall &prevCall = *prevRects[curFound[r]].call;
+            anyMoved = anyMoved || (prevCall.gameRect.ulx != curCall.gameRect.ulx) || (prevCall.gameRect.uly != curCall.gameRect.uly);
+        }
+
+        if (anyMoved && anyUnpaired) {
+            thread_local std::vector<size_t> lineRoot;
+            lineRoot.resize(curRects.size());
+            for (size_t r = 0; r < curRects.size(); r++) {
+                lineRoot[r] = r;
+            }
+
+            auto rootOf = [](size_t r) {
+                while (lineRoot[r] != r) {
+                    lineRoot[r] = lineRoot[lineRoot[r]];
+                    r = lineRoot[r];
+                }
+
+                return r;
+            };
+
+            auto inLine = [](const DrawCall &a, const DrawCall &b) {
+                if ((a.rectDsdx != b.rectDsdx) || (a.rectDtdy != b.rectDtdy)) {
+                    return false;
+                }
+
+                const int32_t aWidth = a.gameRect.lrx - a.gameRect.ulx;
+                const int32_t bWidth = b.gameRect.lrx - b.gameRect.ulx;
+                const int32_t aHeight = a.gameRect.lry - a.gameRect.uly;
+                const int32_t bHeight = b.gameRect.lry - b.gameRect.uly;
+                if ((aWidth > (bWidth * 2)) || (bWidth > (aWidth * 2)) || (aHeight > (bHeight * 2)) || (bHeight > (aHeight * 2))) {
+                    return false;
+                }
+
+                const int32_t overlap = std::min(a.gameRect.lry, b.gameRect.lry) - std::max(a.gameRect.uly, b.gameRect.uly);
+                const int32_t gap = std::max(a.gameRect.ulx, b.gameRect.ulx) - std::min(a.gameRect.lrx, b.gameRect.lrx);
+                return ((overlap * 2) > std::min(aHeight, bHeight)) && (gap < (std::max(aHeight, bHeight) * 2));
+            };
+
+            for (size_t a = 0; a < curRects.size(); a++) {
+                for (size_t b = a + 1; b < curRects.size(); b++) {
+                    if (inLine(*curRects[a].call, *curRects[b].call)) {
+                        lineRoot[rootOf(a)] = rootOf(b);
+                    }
+                }
+            }
+
+            auto moveOf = [&](size_t r, int32_t &dx, int32_t &dy) {
+                const DrawCall &curCall = *curRects[r].call;
+                const DrawCall &prevCall = *prevRects[curFound[r]].call;
+                dx = prevCall.gameRect.ulx - curCall.gameRect.ulx;
+                dy = prevCall.gameRect.uly - curCall.gameRect.uly;
+            };
+
+            thread_local std::vector<size_t> lineUnpaired;
+            lineUnpaired.assign(curRects.size(), 0);
+            for (size_t r = 0; r < curRects.size(); r++) {
+                if (curFound[r] == prevRects.size()) {
+                    lineUnpaired[rootOf(r)]++;
+                }
+            }
+
+            thread_local std::vector<bool> curAlone;
+            curAlone.assign(curRects.size(), false);
+            for (size_t r = 0; r < curRects.size(); r++) {
+                const size_t root = rootOf(r);
+                if ((curFound[r] == prevRects.size()) || (lineUnpaired[root] == 0)) {
+                    continue;
+                }
+
+                int32_t dx, dy;
+                moveOf(r, dx, dy);
+                if ((dx == 0) && (dy == 0)) {
+                    continue;
+                }
+
+                size_t looks = 0;
+                for (size_t k = 0; (k < prevRects.size()) && (looks < 2); k++) {
+                    looks += sameLook(*curRects[r].call, *prevRects[k].call) ? 1 : 0;
+                }
+
+                if (looks < 2) {
+                    continue;
+                }
+
+                size_t withIt = 0;
+                for (size_t c = 0; c < curRects.size(); c++) {
+                    if ((curFound[c] == prevRects.size()) || (rootOf(c) != root)) {
+                        continue;
+                    }
+
+                    int32_t cx, cy;
+                    moveOf(c, cx, cy);
+                    withIt += ((abs(cx - dx) <= 4) && (abs(cy - dy) <= 4)) ? 1 : 0;
+                }
+
+                curAlone[r] = ((withIt * 3) <= lineUnpaired[root]);
+            }
+
+            for (size_t r = 0; r < curRects.size(); r++) {
+                if (curAlone[r]) {
+                    prevUsed[curFound[r]] = false;
+                    curFound[r] = prevRects.size();
+                    curScaled[r] = false;
+                }
+            }
+        }
+
         // By a rect's index, the texcoords its upper left moved by from the frame before when its texture slides by
         // them, for the strip that adjoins it with no pair of its own (below).
         struct RectSlide {
