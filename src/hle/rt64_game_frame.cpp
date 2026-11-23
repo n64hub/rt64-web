@@ -855,11 +855,15 @@ namespace RT64 {
         };
 
         // Farther than that, less than four times its longer side each way, a rect pairs with one of the frame before
-        // that drew the same textures at the same size and scale when it is the only rect of each frame with that look:
-        // with no look-alike to be taken for, it is the same thing however fast the game moves it, and four of its sides
-        // still leave out a jump to another place on the screen. Mario Golf's pin flag in the sky, 8 by 16 pixels,
-        // which a fast turn of the view moves 22 to 26 pixels a game frame, was left unpaired, held still in the frames
-        // between and stepped once a game frame against the course turning behind it.
+        // that drew the same textures at the same size and scale when it is the only rect of each frame with those
+        // textures, at any scale: with nothing to be taken for, it is the same thing however fast the game moves it, and
+        // four of its sides still leave out a jump to another place on the screen. Mario Golf's pin flag in the sky, 8
+        // by 16 pixels, which a fast turn of the view moves 22 to 26 pixels a game frame, was left unpaired, held still
+        // in the frames between and stepped once a game frame against the course turning behind it. At any scale, since
+        // sprites the game grows and shrinks as they twinkle (Mario Golf's sparkles over the pictures of its credits, a
+        // few textures at a dozen sizes) are each the only one of their size in a frame: a sparkle paired with another
+        // of its size 20 to 36 pixels away, and the frames between slid it across the picture. The passes after pair
+        // each with itself at its size in the frame before.
         auto onlyOneFar = [&](const RectCall &ra, size_t j) {
             const DrawCall &a = *ra.call;
             const DrawCall &b = *prevRects[j].call;
@@ -868,12 +872,12 @@ namespace RT64 {
                 return false;
             }
             for (size_t k = 0; k < prevRects.size(); k++) {
-                if ((k != j) && sameLook(a, *prevRects[k].call)) {
+                if ((k != j) && sameTiles(a, *prevRects[k].call)) {
                     return false;
                 }
             }
             for (const RectCall &c : curRects) {
-                if ((&c != &ra) && sameLook(*c.call, b)) {
+                if ((&c != &ra) && sameTiles(*c.call, b)) {
                     return false;
                 }
             }
