@@ -881,10 +881,14 @@ namespace RT64 {
         };
 
         // The edge the game holds one way, of a rect (a) and the one it pairs with in the frame before (b): 1 its upper
-        // left, 2 its lower right, 0 neither. One that stayed while the other moved, or, with both moved, one that came
-        // onto the scissor's from inside it, where the game cuts the rect: the strip of a panorama under one that left
-        // the picture over the top, whole in the frame before and cut at the top in this one (Mario Golf's hills as
-        // the camera pitches down).
+        // left, 2 its lower right, 0 neither. One that stayed while the other moved, or, with both moved by different
+        // amounts, one that came onto the scissor's from inside it, where the game cuts the rect: the strip of a
+        // panorama under one that left the picture over the top, whole in the frame before and cut at the top in this
+        // one (Mario Golf's hills as the camera pitches down). A rect whose edges both moved by the same amount kept its
+        // size, so the game moved it whole and cut nothing, wherever the scissor cuts what is drawn of it: Excitebike
+        // 64 slides the glyphs of its Rider Select bio up and down through its box's scissor as the box opens and
+        // closes, and its stats' labels sideways out through their panel's, and with the edge past the scissor held
+        // there the frames between stretched each glyph from its other edge, its texels sliding across it as columns.
         auto heldEdge = [](const DrawCall &ca, const DrawCall &cb, bool vertical) {
             const int32_t aUl = vertical ? ca.gameRect.uly : ca.gameRect.ulx;
             const int32_t aLr = vertical ? ca.gameRect.lry : ca.gameRect.lrx;
@@ -896,7 +900,7 @@ namespace RT64 {
                 return (ulMove == 0) ? 1 : 2;
             }
 
-            if (ulMove == 0) {
+            if (ulMove == lrMove) {
                 return 0;
             }
 
