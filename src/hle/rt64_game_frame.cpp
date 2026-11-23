@@ -687,9 +687,10 @@ namespace RT64 {
     // than its shorter side, is passed over when one of another size with the same textures lies nearer: the same
     // textures drawn in several places, each cut by the screen's edge as they slide off it, a frame or two apart (Mario
     // Golf's save menu, three slots of one wooden strip), take on each other's sizes, and a slot paired with the one
-    // above it, its own cut strip being nearer. That is the rect itself, cut to another size, which the last pass
-    // pairs. A rect drawn in the same place in both frames' order of rects, the frames having drawn the same ones in
-    // the same order before and after it, pairs with that one alone, in every pass, or with none (but by place first
+    // above it, its own cut strip being nearer. That is the rect itself, cut to another size, with the same texels at
+    // a corner each way, which the last pass pairs; another glyph of a font page as near isn't. A rect drawn in the
+    // same place in both frames' order of rects, the frames having drawn the same ones in the same order before and
+    // after it, pairs with that one alone, in every pass, or with none (but by place first
     // when another rect now stands in that one's place with its look, the same things drawn in another order): a
     // glyph of a line of text the game slides faster than a glyph's size a game frame paired with the same letter of
     // another word, or its shadow's, so the frames between drew those letters a few pixels from the rest. When every corner's
@@ -1218,7 +1219,11 @@ namespace RT64 {
                 }
             }
 
-            // Farther than its shorter side, a look-alike of another size nearer is the rect itself, cut to that size.
+            // Farther than its shorter side, a look-alike of another size nearer is the rect itself, cut to that size,
+            // where it shows the same texels at one of its corners each way (sameCorners): another glyph of its font
+            // page has the same look and differs at both. Excitebike 64 slides its Rider Select stats card 7 pixels a
+            // game frame, the width of its font's r, and the b beside Turbo's r, a pixel from where the r was, passed
+            // for the r cut wider: the r went unpaired, and the frames between drew it where the game put it, on the b.
             if (curFound[r] < prevRects.size()) {
                 const DrawCall &foundCall = *prevRects[curFound[r]].call;
                 const int32_t shorter = std::min(curCall.gameRect.lrx - curCall.gameRect.ulx, curCall.gameRect.lry - curCall.gameRect.uly);
@@ -1226,7 +1231,7 @@ namespace RT64 {
                     for (size_t j = 0; j < prevRects.size(); j++) {
                         const DrawCall &prevCall = *prevRects[j].call;
                         const int32_t distance = abs(prevCall.gameRect.ulx - curCall.gameRect.ulx) + abs(prevCall.gameRect.uly - curCall.gameRect.uly);
-                        if ((distance < nearest) && !sameSize(curCall, prevCall) && sameLook(curCall, prevCall)) {
+                        if ((distance < nearest) && !sameSize(curCall, prevCall) && sameLook(curCall, prevCall) && sameCorners(curRects[r], prevRects[j], true)) {
                             curFound[r] = prevRects.size();
                             break;
                         }
