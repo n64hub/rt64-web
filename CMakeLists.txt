@@ -38,6 +38,7 @@ option(RT64_INTERPOLATE_SCREEN_VERTICES "Draw a screen position a game writes in
 option(RT64_TILE_COPY_TMEM_FALLBACK "Sample the texture a tile loaded into TMEM when the texcoords of the call that uses it reach past the framebuffer tile copy found for it, not an empty texture: a tile loaded from a framebuffer whose rows were drawn only in part in the list before draws black where it should draw what RAM holds (always on with Emscripten)" OFF)
 option(RT64_REJ_WITHOUT_NEAR_CLIP "Draw what a Rej microcode (F3DLX2.Rej, F3DEX2.Rej...) sends past the near plane as a NoN one does, its depth clamped, not discard it: a Rej microcode rejects instead of clipping, and its reject box has a far plane but no near one, so the console draws it (always on with Emscripten)" OFF)
 option(RT64_SUBPIXEL_TEXRECTS "Draw a texrect that samples a texture in 1 or 2 cycle mode at the corners the game gave it, to a quarter pixel, with its texture starting at its top, not on the whole pixels its corners round up to with its texture a row further on when its top is not on one, so that a sprite a game places by fractions of a pixel moves smoothly at a high resolution, as a triangle does (off with Emscripten too: a game turns it on)" OFF)
+option(RT64_RECT_OWN_PIXEL_GRID "Step a texrect's texture a native pixel at a time from the rect's own left and top edges, each native pixel as wide as the rect is drawn, not on the screen's grid of native pixels as wide as they are tall, so that a rect drawn stretched (one that spans the scissor's width in a picture RT64 draws wider than 4:3) or off that grid samples no texel before its first, which a wrapped tile reads from its other side: a line at each tile's left edge (always on with Emscripten)" OFF)
 option(RT64_EXPAND_SCREEN_VERTICES "Scale the screen x a game writes into a vertex itself (G_MODIFYVTX's XYSCREEN) toward its viewport's centre as its projection's x is scaled for a picture RT64 draws wider than 4:3 (Aspect Ratio Expand), so that a game that projects its own geometry draws it where its projected models and its 2D are, not stretched across the picture (always on with Emscripten)" OFF)
 
 if (NOT ${RT64_STATIC})
@@ -169,6 +170,12 @@ endif()
 # (RasterPS.hlsl): a fix for any game with a texture pack, behind an option since it changes what upstream draws.
 if (RT64_FLIPPED_RECT_HIGH_RES OR RT64_WGSL)
     list(APPEND DXC_COMMON_OPTS "-D" "FLIPPED_RECT_HIGH_RES")
+endif()
+# A texrect's texture stepped a native pixel at a time from its own edges (RasterPS.hlsl), with the step and the edges
+# the renderer gives it (rt64_raster_params.h).
+if (RT64_RECT_OWN_PIXEL_GRID OR RT64_WGSL)
+    set (RT64_RECT_OWN_PIXEL_GRID ON)
+    list(APPEND DXC_COMMON_OPTS "-D" "RECT_OWN_PIXEL_GRID")
 endif()
 # A texture's colour filtered by its texels' alpha where the alpha decides the coverage (TextureSampler.hlsli).
 if (RT64_FILTER_BY_ALPHA)
@@ -615,6 +622,9 @@ if (RT64_INTERPOLATE_SCREEN_VERTICES OR RT64_WGSL)
 endif()
 if (RT64_SUBPIXEL_TEXRECTS)
     target_compile_definitions(rt64 PRIVATE RT64_SUBPIXEL_TEXRECTS=1)
+endif()
+if (RT64_RECT_OWN_PIXEL_GRID OR RT64_WGSL)
+    target_compile_definitions(rt64 PRIVATE RT64_RECT_OWN_PIXEL_GRID=1)
 endif()
 if (RT64_TILE_COPY_TMEM_FALLBACK OR RT64_WGSL)
     target_compile_definitions(rt64 PRIVATE RT64_TILE_COPY_TMEM_FALLBACK=1)
