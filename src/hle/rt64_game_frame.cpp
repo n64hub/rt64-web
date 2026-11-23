@@ -984,8 +984,10 @@ namespace RT64 {
                 (follows(a.gameRect.uly, a.gameRect.lry, b.gameRect.uly, b.gameRect.lry) || cutAt(ra, rb, true));
         };
 
-        // The same texels at its corners, within a texel each way: the least and most texcoord over its vertices.
-        auto sameCorners = [&](const RectCall &a, const RectCall &b) {
+        // The same texels at its corners, within a texel each way: the least and most texcoord over its vertices. Or,
+        // with either, the same at one of the two each way: the same glyph of a font page, a pixel wider or narrower as
+        // the game rounds where it lands or cut at one edge, where another glyph of the page differs at both.
+        auto sameCorners = [&](const RectCall &a, const RectCall &b, bool either) {
             const float *aTc = &curData.triTcFloats[a.rawVertex * 2];
             const float *bTc = &prevData.triTcFloats[b.rawVertex * 2];
             for (uint32_t axis = 0; axis < 2; axis++) {
@@ -997,7 +999,9 @@ namespace RT64 {
                     bMax = std::max(bMax, bTc[v * 2 + axis]);
                 }
 
-                if ((fabsf(aMin - bMin) > 1.0f) || (fabsf(aMax - bMax) > 1.0f)) {
+                const bool sameMin = (fabsf(aMin - bMin) <= 1.0f);
+                const bool sameMax = (fabsf(aMax - bMax) <= 1.0f);
+                if (either ? (!sameMin && !sameMax) : (!sameMin || !sameMax)) {
                     return false;
                 }
             }
@@ -1033,15 +1037,27 @@ namespace RT64 {
         // "There is no saved data" drawn "Ther eis nos aved dta"). Unpaired, it is drawn where the game put it, as the
         // rest of its line is. Where the frames drew a different number of rects, a rect that both the run from the
         // start and the run from the end reach has two places, one rect apart or more, with the same look in each (a
-        // repeated letter where a glyph came or went): it has no own, and pairs as it did before there were owns.
+        // repeated letter where a glyph came or went): it has no own, and pairs as it did before there were owns. And
+        // there, the runs compare the glyph too (sameCorners, at one corner or the other each way): every glyph of a
+        // font page has the same look, so a run of them went on past where one came or went, each glyph after it
+        // taking the one a place along for its own, another glyph too far away or of another size to pair with.
+        // Excitebike 64 culls each row of its Rider Select bio as it scrolls out over the box's top, 4 pixels a game
+        // frame as the box opens and closes, and the run from the start went on past a culled glyph to the next font
+        // page: 18 of the bio's glyphs had another glyph for their own and were drawn where the game put them in the
+        // frames between, the rest of their lines gliding past them.
+        auto sameInOrder = [&](size_t c, size_t p) {
+            return sameLook(*curRects[c].call, *prevRects[p].call) &&
+                (untextured || (curRects.size() == prevRects.size()) || sameCorners(curRects[c], prevRects[p], true));
+        };
+
         const size_t commonCount = std::min(curRects.size(), prevRects.size());
         size_t head = 0;
-        while ((head < commonCount) && sameLook(*curRects[head].call, *prevRects[head].call)) {
+        while ((head < commonCount) && sameInOrder(head, head)) {
             head++;
         }
 
         size_t tail = 0;
-        while ((tail < commonCount) && sameLook(*curRects[curRects.size() - 1 - tail].call, *prevRects[prevRects.size() - 1 - tail].call)) {
+        while ((tail < commonCount) && sameInOrder(curRects.size() - 1 - tail, prevRects.size() - 1 - tail)) {
             tail++;
         }
 
@@ -1209,7 +1225,7 @@ namespace RT64 {
                 const DrawCall &prevCall = *prevRects[j].call;
                 const bool sameScale = (curCall.rectDsdx == prevCall.rectDsdx) && (curCall.rectDtdy == prevCall.rectDtdy);
                 if (((curOwn[r] < prevRects.size()) && (j != curOwn[r])) || prevUsed[j] || sameScale || !movedLess(curCall, prevCall) ||
-                    !sameTiles(curCall, prevCall) || !sameCorners(curRects[r], prevRects[j]))
+                    !sameTiles(curCall, prevCall) || !sameCorners(curRects[r], prevRects[j], false))
                 {
                     continue;
                 }
