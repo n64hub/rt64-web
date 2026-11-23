@@ -42,9 +42,11 @@ namespace RT64 {
         // Mario Golf's menus, now and then as a frame ran late, showed a character with a forearm gone for one frame, or
         // an arm where the next pose put it. Unlike presented, which a dropped present sets too (skipInterpolation()).
         bool shown = false;
-        // RT64_FRAME_DUMP: the last workload's id of the game frame these counters' frames were drawn from, for its
-        // presents.tsv (rt64_frame_dump.h).
+        // RT64_FRAME_DUMP: the last workload's id of the game frame these counters' frames were drawn from, and the color
+        // image's address of their interpolation target, the framebuffer each frame between holds, for its presents.tsv
+        // (rt64_frame_dump.h).
         uint64_t workloadId = 0;
+        uint32_t interpolationAddress = 0;
     };
 
     struct SharedQueueResources {

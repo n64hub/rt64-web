@@ -56,8 +56,13 @@
 //       place in the game's own frame). Only the frames presented: a framebuffer drawn for render-to-RAM on the game's
 //       thread writes none.
 //   About a hundredth of frames.bin's size (1.6 MB beside 129 MB for 7 s of a race at 120 frames a second).
-// - <dir>/presents.tsv: "<present id>\t<frame of the present>\t<frames it showed>\t<game frame's last workload id>" for
-//   each frame put in frames.bin, the game frame whose draws.bin block says what drew it.
+// - <dir>/presents.tsv: "<present id>\t<frame of the present>\t<frames it showed>\t<game frame's last workload id>\t<the
+//   framebuffer shown>" for each frame put in frames.bin, the game frame whose draws.bin block says what drew it, and
+//   the color image's address of the framebuffer the frame is (its B lines' draws are the ones in it), 0 for none: the
+//   one the present took from the VI for the game's own frame, and the frame's interpolation target for one between,
+//   which holds that framebuffer drawn again. A frame may draw several framebuffers and show any one of them, not the
+//   largest: Mario Golf's credits fill one the size of the window and draw the picture and its text into another, 226
+//   rows high.
 //
 // With RT64_FRAME_DUMP_SECONDS, only what comes between those seconds after the first present is written, a scene's
 // worth rather than gigabytes of the boot: about 40 MB a second of frames at 640 wide and 60 a second.
@@ -197,6 +202,9 @@ namespace RT64 {
         uint64_t workloadNumber = 0;
         std::unique_ptr<RenderBuffer> readbackBuffer;
         uint64_t readbackBufferSize = 0;
+        // readbackFrame's color image address of the framebuffer it is (readback()'s shownAddress), which addFrame()
+        // writes in its presents.tsv line.
+        uint32_t readbackShownAddress = 0;
         struct {
             uint64_t presentId;
             uint32_t index;
@@ -312,8 +320,11 @@ namespace RT64 {
         // The frame a present shows, from its color target once the frame is drawn into it (the VI renderer's p, which
         // has drawn it): read back by the present's commands, and handed on at the next one's, the present that read it
         // back waited for since then. workloadId is the last workload's of the game frame it was drawn from, its
-        // InterpolatedFrameCounters', for presents.tsv. Present thread.
-        void readback(const VIRenderer::RenderParams &p, uint64_t presentId, uint32_t index, uint32_t count, uint64_t workloadId) {
+        // InterpolatedFrameCounters', and shownAddress the color image's address of the framebuffer the frame is, for
+        // presents.tsv. Present thread.
+        void readback(const VIRenderer::RenderParams &p, uint64_t presentId, uint32_t index, uint32_t count, uint64_t workloadId,
+            uint32_t shownAddress)
+        {
             if (readbackFrame.width > 0) {
                 const uint8_t *data = reinterpret_cast<const uint8_t *>(readbackBuffer->map());
                 if (data != nullptr) {
@@ -340,6 +351,7 @@ namespace RT64 {
                 return;
             }
 
+            readbackShownAddress = shownAddress;
             const uint32_t pixelSize = sixteenBits ? 8 : 4;
             const uint32_t rowPitch = ((width * pixelSize) + 255) & ~255U;
             const uint64_t size = uint64_t(rowPitch) * height;
@@ -416,7 +428,8 @@ namespace RT64 {
             droppedSinceLast = 0;
             queue.emplace_back(std::move(frame));
             condition.notify_one();
-            fprintf(presentsFile, "%llu\t%u\t%u\t%llu\n", (unsigned long long)(presentId), index, count, (unsigned long long)(workloadId));
+            fprintf(presentsFile, "%llu\t%u\t%u\t%llu\t%08x\n", (unsigned long long)(presentId), index, count,
+                (unsigned long long)(workloadId), readbackShownAddress);
             fflush(presentsFile);
         }
 

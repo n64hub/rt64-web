@@ -1506,6 +1506,7 @@ namespace RT64 {
                 curFrameCounters.available = 0;
                 curFrameCounters.count = displayFrames;
                 curFrameCounters.workloadId = lastWorkload.workloadId;
+                curFrameCounters.interpolationAddress = interpolationTargetKey.address;
 #           if RT64_GAME_FRAME_WORKLOADS
                 curInterpolatedLock.unlock();
 #           endif

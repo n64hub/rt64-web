@@ -432,7 +432,14 @@ namespace RT64 {
 
                 // RT64_FRAME_DUMP: the frame shown, read back for a test (rt64_frame_dump.h).
                 if (FrameDump *frameDump = FrameDump::get()) {
-                    frameDump->readback(renderParams, present.presentId, uint32_t(i), uint32_t(framesToPresent), frameCounters.workloadId);
+                    // The color image's address of the framebuffer colorTarget holds: the one its key named for the game's
+                    // own frame (the framebuffer the present took, or the VI's origin where RDRAM is shown), and the
+                    // interpolation target's for a frame between, whose kept targets are named by the first they held.
+                    const bool between = (framesToPresent > 1) && (usingMSAA || (i > 0));
+                    const uint32_t shownAddress = (colorTarget == nullptr) ? 0 :
+                        (between ? frameCounters.interpolationAddress : colorTarget->addressForName);
+                    frameDump->readback(renderParams, present.presentId, uint32_t(i), uint32_t(framesToPresent), frameCounters.workloadId,
+                        shownAddress);
                 }
 
                 {
