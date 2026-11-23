@@ -792,6 +792,57 @@ namespace RT64 {
 
         const DrawData &curData = curWorkload.drawData;
         const DrawData &prevData = prevWorkload.drawData;
+
+        // Calls share tile entries: RT64 gives a call new ones only when the texture's state changed since the last
+        // (State::loadDrawState()), so rects the game draws one after another from one texture, changing only their
+        // colours or places between them, are drawn from one set. A slide written to a shared entry moves every one of
+        // their textures, so each rect asks for its slide (askSlide()), and it is written once they all have, only to an
+        // entry that every paired rect drawn from it asked the same of: a paired rect that asks nothing asks for no
+        // slide, and one unpaired (a glyph of a scrolling line just come in) has no say. Mario Golf's lens flare draws
+        // its eight circles from one texture, and as the one beyond the sun was cut a few rows further at the screen's
+        // corner each frame, its texture's slide moved the other seven's too: between the game's frames each showed the
+        // rim of its mirrored texture as a cap over it.
+        struct TileSlide {
+            float moveS, moveT, scaleS, scaleT;
+        };
+
+        thread_local std::vector<uint16_t> tileUsers;
+        thread_local std::vector<uint16_t> tileAsks;
+        thread_local std::vector<bool> tileSeen;
+        thread_local std::vector<bool> tileDiffers;
+        thread_local std::vector<TileSlide> tileSlides;
+        thread_local std::vector<uint32_t> tilesAsked;
+        tileUsers.assign(curData.rdpTiles.size(), 0);
+        tileAsks.assign(curData.rdpTiles.size(), 0);
+        tileSeen.assign(curData.rdpTiles.size(), false);
+        tileDiffers.assign(curData.rdpTiles.size(), false);
+        tileSlides.resize(curData.rdpTiles.size());
+        tilesAsked.clear();
+
+        // paired: the rect asking has its own in the frame before, so it is one of tileUsers.
+        auto askSlide = [&](uint32_t tileIndex, float moveS, float moveT, float scaleS, float scaleT, bool paired) {
+            if (tileIndex >= tileAsks.size()) {
+                return;
+            }
+
+            const TileSlide slide = { moveS, moveT, scaleS, scaleT };
+            if (!tileSeen[tileIndex]) {
+                tileSeen[tileIndex] = true;
+                tileSlides[tileIndex] = slide;
+                tilesAsked.push_back(tileIndex);
+            }
+            else {
+                const TileSlide &asked = tileSlides[tileIndex];
+                if ((asked.moveS != moveS) || (asked.moveT != moveT) || (asked.scaleS != scaleS) || (asked.scaleT != scaleT)) {
+                    tileDiffers[tileIndex] = true;
+                }
+            }
+
+            if (paired) {
+                tileAsks[tileIndex]++;
+            }
+        };
+
         auto sameSize = [](const DrawCall &a, const DrawCall &b) {
             return ((a.gameRect.lrx - a.gameRect.ulx) == (b.gameRect.lrx - b.gameRect.ulx)) && ((a.gameRect.lry - a.gameRect.uly) == (b.gameRect.lry - b.gameRect.uly));
         };
@@ -1588,24 +1639,12 @@ namespace RT64 {
                 continue;
             }
 
-            // A tile's corners are in quarter texels, and the shader subtracts them from the texcoords it scaled.
             for (uint32_t t = 0; t < curCall.tileCount; t++) {
                 const uint32_t tileIndex = curCall.tileIndex + t;
                 const interop::RDPTile &tile = curData.rdpTiles[tileIndex];
-                GameFrameMap::TileMap &tileMap = workloadMap.tiles[tileIndex];
                 const float moveS = resizedS ? (tile.shifts * cornerS) : (stepped ? stepS[t] : 0.0f);
                 const float moveT = resizedT ? (tile.shiftt * cornerT) : (stepped ? stepT[t] : 0.0f);
-                tileMap.curUls = tile.uls;
-                tileMap.curUlt = tile.ult;
-                tileMap.curLrs = tile.lrs;
-                tileMap.curLrt = tile.lrt;
-                tileMap.prevUls = tile.uls + moveS * 4.0f;
-                tileMap.prevUlt = tile.ult + moveT * 4.0f;
-                tileMap.prevLrs = tile.lrs + moveS * 4.0f;
-                tileMap.prevLrt = tile.lrt + moveT * 4.0f;
-                tileMap.prevShiftsScale = scaleS;
-                tileMap.prevShifttScale = scaleT;
-                tileMap.mapped = true;
+                askSlide(tileIndex, moveS, moveT, scaleS, scaleT, true);
             }
 
             if (stepped) {
@@ -1674,20 +1713,9 @@ namespace RT64 {
                     for (uint32_t t = 0; t < curCall.tileCount; t++) {
                         const uint32_t tileIndex = curCall.tileIndex + t;
                         const interop::RDPTile &tile = curData.rdpTiles[tileIndex];
-                        GameFrameMap::TileMap &tileMap = workloadMap.tiles[tileIndex];
                         const float moveS = vertical ? insidePeriod(slide.ds * tile.shifts, tile.masks, tile.cms) : 0.0f;
                         const float moveT = vertical ? 0.0f : insidePeriod(slide.dt * tile.shiftt, tile.maskt, tile.cmt);
-                        tileMap.curUls = tile.uls;
-                        tileMap.curUlt = tile.ult;
-                        tileMap.curLrs = tile.lrs;
-                        tileMap.curLrt = tile.lrt;
-                        tileMap.prevUls = tile.uls + moveS * 4.0f;
-                        tileMap.prevUlt = tile.ult + moveT * 4.0f;
-                        tileMap.prevLrs = tile.lrs + moveS * 4.0f;
-                        tileMap.prevLrt = tile.lrt + moveT * 4.0f;
-                        tileMap.prevShiftsScale = 1.0f;
-                        tileMap.prevShifttScale = 1.0f;
-                        tileMap.mapped = true;
+                        askSlide(tileIndex, moveS, moveT, 1.0f, 1.0f, false);
                     }
 
                     curSlides[r] = { vertical ? slide.ds : 0.0f, vertical ? 0.0f : slide.dt, true };
@@ -1696,6 +1724,41 @@ namespace RT64 {
                     break;
                 }
             }
+        }
+
+        for (size_t r = 0; r < curRects.size(); r++) {
+            const DrawCall &curCall = *curRects[r].call;
+            if (curFound[r] >= prevRects.size()) {
+                continue;
+            }
+
+            for (uint32_t t = 0; t < curCall.tileCount; t++) {
+                if ((curCall.tileIndex + t) < tileUsers.size()) {
+                    tileUsers[curCall.tileIndex + t]++;
+                }
+            }
+        }
+
+        // A tile's corners are in quarter texels, and the shader subtracts them from the texcoords it scaled.
+        for (uint32_t tileIndex : tilesAsked) {
+            if (tileDiffers[tileIndex] || (tileAsks[tileIndex] < tileUsers[tileIndex])) {
+                continue;
+            }
+
+            const TileSlide &slide = tileSlides[tileIndex];
+            const interop::RDPTile &tile = curData.rdpTiles[tileIndex];
+            GameFrameMap::TileMap &tileMap = workloadMap.tiles[tileIndex];
+            tileMap.curUls = tile.uls;
+            tileMap.curUlt = tile.ult;
+            tileMap.curLrs = tile.lrs;
+            tileMap.curLrt = tile.lrt;
+            tileMap.prevUls = tile.uls + slide.moveS * 4.0f;
+            tileMap.prevUlt = tile.ult + slide.moveT * 4.0f;
+            tileMap.prevLrs = tile.lrs + slide.moveS * 4.0f;
+            tileMap.prevLrt = tile.lrt + slide.moveT * 4.0f;
+            tileMap.prevShiftsScale = slide.scaleS;
+            tileMap.prevShifttScale = slide.scaleT;
+            tileMap.mapped = true;
         }
     }
 #endif
