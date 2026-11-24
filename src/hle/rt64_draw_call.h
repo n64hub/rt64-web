@@ -184,6 +184,11 @@ namespace RT64 {
         // the copy's ID: matchRectScrolls pairs rects drawn from tile copies by it.
         uint64_t tileCopySource;
 
+        // RT64_INTERPOLATE_RECT_SCROLLS: for a rect's tile hashed as raw TMEM (rawTMEM, all of it), the hash of what
+        // its texcoords sample, as a tile of that size would hash it; 0 for any other, or where they leave the tile's
+        // start. matchRectScrolls pairs rects by it, where it has one, in place of tmemHashOrID.
+        uint64_t sampledHash;
+
         bool validTexcoords() const {
             return (minTexcoord.x <= maxTexcoord.x) && (minTexcoord.y <= maxTexcoord.y);
         }

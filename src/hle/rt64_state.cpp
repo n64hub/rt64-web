@@ -280,6 +280,7 @@ namespace RT64 {
                     dstCallTile.reinterpretSiz = 0;
                     dstCallTile.reinterpretFmt = 0;
                     dstCallTile.tlut = rdp->otherMode.textLUT();
+                    dstCallTile.sampledHash = 0;
                     dstCallTile.minTexcoord = { INT_MAX, INT_MAX };
                     dstCallTile.maxTexcoord = { INT_MIN, INT_MIN };
 
@@ -758,7 +759,45 @@ namespace RT64 {
             };
         };
 
-        auto uploadTile = [&](uint32_t rdpTileIndex, FramebufferPair &fbPair, const DrawCall &drawCall) {
+#   if RT64_INTERPOLATE_RECT_SCROLLS
+        // A raw TMEM tile's hash covers all of TMEM, whatever the call samples of it: a rect drawn from a few texels
+        // through a tile that wraps at 128 by 128 is hashed with what earlier draws left in TMEM past them, and, through
+        // a 16-colour palette loaded with gDPLoadTLUT_pal256, with the 240 entries loaded past it from whatever follows
+        // the palette in RAM. Its hash changed whenever any of that did, so it was another texture to matchRectScrolls:
+        // Excitebike 64's place marker, an arrow over the rider ahead drawn from a CI4 tile masked to 128 by 128,
+        // changed hash with what was left in TMEM and with the next rider's data, which follows its palette's 16
+        // colours in RAM: in 16 s of a race at 120 Hz it moved a few pixels and was drawn where the game put it in
+        // the frames between in 35 game frames, shaking against its place number and its rider. A rect's tile also gets the hash of what its
+        // texcoords sample (sampledHash): the TMEM a tile of that many texels and rows from its start hashes, with
+        // the palette's colours its texels use, for texcoords that stay at or past the start. Measured as fullSync()
+        // does for a sync's TMEM.
+        auto sampledHash = [&](const DrawCallTile &callTile) -> uint64_t {
+            if (!callTile.validTexcoords()) {
+                return 0;
+            }
+
+            const auto &loadTile = callTile.loadTile;
+            const float xScale = ShiftScaleMap[loadTile.shifts];
+            const float yScale = ShiftScaleMap[loadTile.shiftt];
+            const int32_t minS = int(callTile.minTexcoord.x * xScale) - (loadTile.uls >> 2);
+            const int32_t minT = int(callTile.minTexcoord.y * yScale) - (loadTile.ult >> 2);
+            const int32_t maxS = int(ceilf(callTile.maxTexcoord.x * xScale)) - (loadTile.uls >> 2);
+            const int32_t maxT = int(ceilf(callTile.maxTexcoord.y * yScale)) - (loadTile.ult >> 2);
+            if ((minS < 0) || (minT < 0)) {
+                return 0;
+            }
+
+            const uint16_t texels = uint16_t(std::clamp(maxS, 1, int32_t(callTile.sampleWidth)));
+            const uint16_t rows = uint16_t(std::clamp(maxT, 1, int32_t(callTile.sampleHeight)));
+            if (TMEMHasher::requiresRawTMEM(loadTile, texels, rows, callTile.tlut)) {
+                return 0;
+            }
+
+            return TMEMHasher::hash(reinterpret_cast<const uint8_t *>(rdp->TMEM), loadTile, texels, rows, callTile.tlut, TMEMHasher::CurrentHashVersion);
+        };
+#   endif
+
+        auto uploadTile = [&](uint32_t rdpTileIndex, FramebufferPair &fbPair, const DrawCall &drawCall, bool rect) {
             auto &callTile = workload.drawData.callTiles[rdpTileIndex];
             if (!callTile.valid) {
                 return;
@@ -770,6 +809,11 @@ namespace RT64 {
                 }
                 else if (callTile.rawTMEM) {
                     callTile.tmemHashOrID = textureManager.uploadTMEM(this, callTile.loadTile, ext.textureCache, workload.submissionFrame, 0, RDP_TMEM_BYTES, callTile.sampleWidth, callTile.sampleHeight, callTile.tlut);
+#               if RT64_INTERPOLATE_RECT_SCROLLS
+                    if (rect) {
+                        callTile.sampledHash = sampledHash(callTile);
+                    }
+#               endif
                 }
                 else {
                     callTile.tmemHashOrID = textureManager.uploadTexture(this, callTile.loadTile, ext.textureCache, workload.submissionFrame, callTile.sampleWidth, callTile.sampleHeight, callTile.tlut);
@@ -870,7 +914,7 @@ namespace RT64 {
                 if (gameCall.callDesc.tileCount > 0) {
                     const uint32_t rdpTileLimit = gameCall.callDesc.tileIndex + gameCall.callDesc.tileCount;
                     while (rdpTileCursor < rdpTileLimit) {
-                        uploadTile(rdpTileCursor, fbPair, gameCall.callDesc);
+                        uploadTile(rdpTileCursor, fbPair, gameCall.callDesc, proj.type == Projection::Type::Rectangle);
                         rdpTileCursor++;
                     }
                 }

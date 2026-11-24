@@ -853,7 +853,8 @@ namespace RT64 {
             return (float(a.x) == float(b.x)) && (float(a.y) == float(b.y)) && (float(a.z) == float(b.z)) && (float(a.w) == float(b.w));
         };
 
-        // The same textures, whatever the rect's size and scale; a tile copy's by what it holds, not by its ID.
+        // The same textures, whatever the rect's size and scale; a tile copy's by what it holds, not by its ID, and a raw
+        // TMEM tile's by what its texcoords sample of TMEM where it has that hash (DrawCallTile::sampledHash).
         auto sameTiles = [&](const DrawCall &a, const DrawCall &b) {
             if (a.tileCount != b.tileCount) {
                 return false;
@@ -870,7 +871,7 @@ namespace RT64 {
                 const DrawCallTile &cb = prevData.callTiles[b.tileIndex + t];
                 const bool sameTexels = (ca.tileCopyUsed || cb.tileCopyUsed) ?
                     (ca.tileCopyUsed && cb.tileCopyUsed && (ca.tileCopySource == cb.tileCopySource)) :
-                    (ca.tmemHashOrID == cb.tmemHashOrID);
+                    (((ca.sampledHash != 0) ? ca.sampledHash : ca.tmemHashOrID) == ((cb.sampledHash != 0) ? cb.sampledHash : cb.tmemHashOrID));
                 const interop::RDPTile &ta = curData.rdpTiles[a.tileIndex + t];
                 const interop::RDPTile &tb = prevData.rdpTiles[b.tileIndex + t];
                 if (!sameTexels ||
