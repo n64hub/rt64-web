@@ -173,7 +173,7 @@ if (RT64_FLIPPED_RECT_HIGH_RES OR RT64_WGSL)
     list(APPEND DXC_COMMON_OPTS "-D" "FLIPPED_RECT_HIGH_RES")
 endif()
 # A texrect's texture stepped a native pixel at a time from its own edges (RasterPS.hlsl), with the step and the edges
-# the renderer gives it (rt64_raster_params.h).
+# the renderer gives it in the draw's RenderIndices (rt64_render_indices.h).
 if (RT64_RECT_OWN_PIXEL_GRID OR RT64_WGSL)
     set (RT64_RECT_OWN_PIXEL_GRID ON)
     list(APPEND DXC_COMMON_OPTS "-D" "RECT_OWN_PIXEL_GRID")

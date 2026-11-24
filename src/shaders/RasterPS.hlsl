@@ -212,26 +212,9 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
     
     float2 lowResUV = vertexUV;
     if (!renderFlagUpscale2D(rp.flags)) {
-#if defined(RECT_OWN_PIXEL_GRID)
-        // RT64_RECT_OWN_PIXEL_GRID (on with WGSL): a texrect steps its texture a native pixel at a time from its own
-        // left and top edges, each native pixel as wide as the renderer drew the rect (rt64_raster_params.h), so a
-        // stretched rect's first pixels sample its first texel; the screen's grid below, as wide as tall, starts its
-        // first native pixel partway along, and they sampled the texel before it. A pixel belongs to the native pixel
-        // its center is in.
-        if (renderFlagRect(rp.flags) && (gConstants.padding1 != 0)) {
-            const float2 nativePixel = float2(asfloat(gConstants.padding1), FbParams.resolutionScale.y);
-            const float2 edgePhase = float2(gConstants.padding2 & 0xFFFFU, gConstants.padding2 >> 16U) / 256.0f;
-            const float2 fromEdge = floor(vertexPosition.xy) - edgePhase;
-            const float2 inNativePixel = fromEdge - floor((fromEdge + 0.5f) / nativePixel) * nativePixel;
-            lowResUV -= inNativePixel * float2(ddxVertexUV.x, ddyVertexUV.y);
-        }
-        else
-#endif
-        {
-            float2 screenPos = floor(vertexPosition.xy);
-            screenPos.x += FbParams.horizontalMisalignment;
-            lowResUV -= fmod(screenPos.xy, FbParams.resolutionScale.yy) * float2(ddxVertexUV.x, ddyVertexUV.y);
-        }
+        float2 screenPos = floor(vertexPosition.xy);
+        screenPos.x += FbParams.horizontalMisalignment;
+        lowResUV -= fmod(screenPos.xy, FbParams.resolutionScale.yy) * float2(ddxVertexUV.x, ddyVertexUV.y);
     }
 
     // A high resolution tile is sampled at vertexUV, which on a rect drawn backwards (a negative dsdx or dtdy) runs
@@ -242,6 +225,22 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
 #if defined(FLIPPED_RECT_HIGH_RES)
     if (renderFlagRect(rp.flags) && !renderFlagUpscale2D(rp.flags)) {
         highResUV -= min(float2(ddxVertexUV.x, ddyVertexUV.y), 0.0f) * FbParams.resolutionScale.yy;
+    }
+#endif
+
+#if defined(RECT_OWN_PIXEL_GRID)
+    // RT64_RECT_OWN_PIXEL_GRID (on with WGSL): a texrect's low resolution UV steps a native pixel at a time from the
+    // rect's own left and top edges, not on the screen's grid above, each native pixel as wide as the renderer drew the
+    // rect: a stretched rect's are wider than tall, and on that grid its first pixels sampled the texel before its
+    // first. The draw's rectPixelGrid (rt64_render_indices.h) holds the width and where the edges fall in the native
+    // pixel, 0 for no rect. A pixel belongs to the native pixel its center is in.
+    const uint rectPixelGrid = instanceRenderIndices[RENDER_INDEX].rectPixelGrid;
+    if (renderFlagRect(rp.flags) && !renderFlagUpscale2D(rp.flags) && ((rectPixelGrid & 0xFFFFU) != 0)) {
+        const float2 nativePixel = float2(float(rectPixelGrid & 0xFFFFU) / 256.0f, FbParams.resolutionScale.y);
+        const float2 edgePhase = float2((rectPixelGrid >> 16U) & 0xFFU, rectPixelGrid >> 24U) / 256.0f * nativePixel;
+        const float2 fromEdge = floor(vertexPosition.xy) - edgePhase;
+        const float2 inNativePixel = fromEdge - floor((fromEdge + 0.5f) / nativePixel) * nativePixel;
+        lowResUV = vertexUV - inNativePixel * float2(ddxVertexUV.x, ddyVertexUV.y);
     }
 #endif
 

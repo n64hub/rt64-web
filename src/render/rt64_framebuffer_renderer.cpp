@@ -652,10 +652,6 @@ namespace RT64 {
                 rasterParams.renderIndex = i;
                 rasterParams.screenScale = triangles.screenScale;
                 rasterParams.screenOffset = triangles.screenOffset;
-#           if RT64_RECT_OWN_PIXEL_GRID
-                memcpy(&rasterParams.padding1, &triangles.rectPixelWidth, sizeof(uint32_t));
-                rasterParams.padding2 = triangles.rectEdgePhase;
-#           endif
 #           ifdef RT64_RENDER_INDEX_BY_INSTANCE
                 // The shaders take the draw's index as its first instance instead (rt64_raster_params.h).
                 rasterParams.renderIndex = 0;
@@ -1608,10 +1604,6 @@ namespace RT64 {
             auto &triangles = instanceDrawCall.triangles;
             triangles.screenScale = { 1.0f, 1.0f };
             triangles.screenOffset = halfPixelOffset;
-#       if RT64_RECT_OWN_PIXEL_GRID
-            triangles.rectPixelWidth = 0.0f;
-            triangles.rectEdgePhase = 0;
-#       endif
 
             float projInvRatioScale = 1.0f / aspectRatioScale;
             const int16_t *viewportClipRatios = &drawData.viewportClipRatios[proj.transformsIndex * 4];
@@ -1871,21 +1863,22 @@ namespace RT64 {
                             // the lines above draw it, as the RDP steps it from the rect's corner (RasterPS.hlsl). Its
                             // native pixel is as wide as its scale makes it: a rect stretched across a picture wider than
                             // 4:3 has them wider than tall, and on the screen's grid, as wide as tall, its first pixels
-                            // sampled before its first texel, which a wrapped tile reads from its other side. Its edges'
-                            // place in its grid is in 256ths of a pixel.
+                            // sampled before its first texel, which a wrapped tile reads from its other side. Its width
+                            // in 256ths of a pixel, then where its left and top edges fall in its native pixel, in 256ths
+                            // of it.
                             {
                                 const float pixelWidth = invRatioScale * p.resolutionScale.x;
                                 const float pixelHeight = p.resolutionScale.y;
                                 const float rectLeft = (triangles.screenOffset.x - halfPixelOffset.x - triangles.screenScale.x + 1.0f) * halfViewportSize.x;
                                 const float rectTop = (1.0f - (triangles.screenOffset.y - halfPixelOffset.y) - triangles.screenScale.y) * halfViewportSize.y;
                                 auto edgePhase = [](float edge, float period) {
-                                    float phase = std::fmod(edge, period);
-                                    phase = (phase < 0.0f) ? (phase + period) : phase;
-                                    return std::min(uint32_t(std::lround(phase * 256.0f)), uint32_t(0xFFFFU));
+                                    float phase = std::fmod(edge, period) / period;
+                                    phase = (phase < 0.0f) ? (phase + 1.0f) : phase;
+                                    return uint32_t(std::lround(phase * 256.0f)) & 0xFFU;
                                 };
 
-                                triangles.rectPixelWidth = pixelWidth;
-                                triangles.rectEdgePhase = edgePhase(rectLeft, pixelWidth) | (edgePhase(rectTop, pixelHeight) << 16U);
+                                const uint32_t width = uint32_t(std::clamp(std::lround(pixelWidth * 256.0f), 1L, 0xFFFFL));
+                                renderIndicesVector.back().rectPixelGrid = width | (edgePhase(rectLeft, pixelWidth) << 16U) | (edgePhase(rectTop, pixelHeight) << 24U);
                             }
 #                       endif
 

@@ -23,9 +23,6 @@ namespace interop {
         uint renderIndex;
         // Three words, not a uint3: WGSL starts a vec3 on 16 bytes, which would move what follows it.
         uint padding0;
-        // RT64_RECT_OWN_PIXEL_GRID: a texrect's native pixel width in the target's pixels (a float's bits), 0 for every
-        // other draw; and where its left and top edges fall in that grid and in the height's, in 256ths of a pixel, x in
-        // the low 16 bits (RasterPS.hlsl).
         uint padding1;
         uint padding2;
         float2 screenScale;

@@ -42,12 +42,6 @@ namespace RT64 {
                 // The depth a G_ZS_PRIM draw's viewport range is narrowed to (RT64_EXACT_PRIM_DEPTH), or -1.
                 float primDepth;
 #           endif
-#           if RT64_RECT_OWN_PIXEL_GRID
-                // A texrect's native pixel width in the target's pixels, 0 for every other draw, and where its edges
-                // fall in its grid of native pixels (RasterParams' padding1 and padding2).
-                float rectPixelWidth;
-                uint32_t rectEdgePhase;
-#           endif
                 uint32_t indexStart;
                 uint32_t faceCount;
                 bool vertexTestZ : 1;
