@@ -109,6 +109,24 @@ float4 sampleDrawTile(uint t, OtherMode otherMode, RenderFlags flags, int tileIn
 }
 #endif
 
+#if RDP_DECAL_TOLERANCE
+// RT64_RDP_DECAL_TOLERANCE: how far a decal's pixel may be from the surface under it, as the RDP's depth test gives it
+// for a pixel's slope dz (the sum of its depth's x and y steps a native pixel, 0 to 1 for 0 to 0x3ffff). The RDP takes
+// the slope in whole steps of 8 (dzdx and dzdy's integer parts) up to the next power of two, doubles the surface's own
+// when the surface's depth is under 0x38000 (exponent below 3) and passes a decal within 8 times the larger of the two,
+// down to a power of two: 2 to 4 times the slope, or 1 to 2 past 0x38000, where RT64 passes 1. A decal lies on the
+// surface it marks, so the surface's slope is taken as the decal's own, and its depth as the pixel's. Coin Block
+// Blitz's block shadows in Mario Party sit 1.1 to 4 times the ground's slope above it, and only this draws them.
+float rdpDecalTolerance(float dz, float depth) {
+    const uint dzSteps = uint(dz * 262143.0f) >> 3;
+    const uint dzPix = (dzSteps >= 0x8000U) ? 0x8000U : ((dzSteps == 0U) ? 1U : (2U << uint(firstbithigh(dzSteps))));
+    const uint exponent = ExponentFromFixedDepth(FloatToFixedDepth(depth));
+    const uint surfaceDz = (exponent < 3U) ? max(dzPix << 1, 16U >> exponent) : dzPix;
+    const uint combinedDz = 1U << uint(firstbithigh(dzPix | surfaceDz));
+    return float(combinedDz << 3) / 262143.0f;
+}
+#endif
+
 LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float2 vertexUV, float4 vertexSmoothColor, float4 vertexFlatColor,
     bool isFrontFace, out float4 resultColor, out float4 resultAlpha) 
 {
@@ -170,6 +188,11 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
         }
 
         const float pixelDepth = select(depthClampNear, max(vertexPosition.z, 0.0f), vertexPosition.z);
+#if RDP_DECAL_TOLERANCE
+        if (!zSourcePrim) {
+            dz = rdpDecalTolerance(dz, pixelDepth);
+        }
+#endif
 #if defined(DECAL_DEPTH_BOUNDS)
         // The depth tests do the check (decalDepthBound()).
         decalDepth = decalDepthBound(pixelDepth, dz, gConstants.padding0 != 0);
