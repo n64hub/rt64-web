@@ -740,25 +740,6 @@ namespace RT64 {
     }
 
     void State::fullSyncFramebufferPairTiles(Workload &workload, FramebufferPair &fbPair, uint32_t &loadOpCursor, uint32_t &rdpTileCursor) {
-        auto loadOperation = [&](uint32_t loadOpIndex) {
-            const auto &loadOp = workload.drawData.loadOperations[loadOpIndex];
-
-            // For emulating how Rice hashes textures, we need information about the load operation that was performed in the particular TMEM address.
-            rdp->rice.lastLoadOpByTMEM[loadOp.tile.tmem] = loadOp;
-
-            switch (loadOp.type) {
-            case LoadOperation::Type::Block:
-                rdp->loadBlockOperation(loadOp.tile, loadOp.texture, false);
-                break;
-            case LoadOperation::Type::Tile:
-                rdp->loadTileOperation(loadOp.tile, loadOp.texture, false);
-                break;
-            case LoadOperation::Type::TLUT:
-                rdp->loadTLUTOperation(loadOp.tile, loadOp.texture, false);
-                break;
-            };
-        };
-
 #   if RT64_INTERPOLATE_RECT_SCROLLS
         // A raw TMEM tile's hash covers all of TMEM, whatever the call samples of it: a rect drawn from a few texels
         // through a tile that wraps at 128 by 128 is hashed with what earlier draws left in TMEM past them, and, through
@@ -767,10 +748,11 @@ namespace RT64 {
         // Excitebike 64's place marker, an arrow over the rider ahead drawn from a CI4 tile masked to 128 by 128,
         // changed hash with what was left in TMEM and with the next rider's data, which follows its palette's 16
         // colours in RAM: in 16 s of a race at 120 Hz it moved a few pixels and was drawn where the game put it in
-        // the frames between in 35 game frames, shaking against its place number and its rider. A rect's tile also gets the hash of what its
-        // texcoords sample (sampledHash): the TMEM a tile of that many texels and rows from its start hashes, with
-        // the palette's colours its texels use, for texcoords that stay at or past the start. Measured as fullSync()
-        // does for a sync's TMEM.
+        // the frames between in 35 game frames, shaking against its place number and its rider. A raw TMEM tile also
+        // gets the hash of what its texcoords sample (sampledHash): the TMEM a tile of that many texels and rows from
+        // its start hashes, with the palette's colours its texels use, for texcoords that stay at or past the start.
+        // Measured as fullSync() does for a sync's TMEM; only a rect's is compared (sameTiles). Defined here, apart
+        // from uploadTile's arguments and the lines beside them, which ports' own RT64 changes.
         auto sampledHash = [&](const DrawCallTile &callTile) -> uint64_t {
             if (!callTile.validTexcoords()) {
                 return 0;
@@ -797,7 +779,26 @@ namespace RT64 {
         };
 #   endif
 
-        auto uploadTile = [&](uint32_t rdpTileIndex, FramebufferPair &fbPair, const DrawCall &drawCall, bool rect) {
+        auto loadOperation = [&](uint32_t loadOpIndex) {
+            const auto &loadOp = workload.drawData.loadOperations[loadOpIndex];
+
+            // For emulating how Rice hashes textures, we need information about the load operation that was performed in the particular TMEM address.
+            rdp->rice.lastLoadOpByTMEM[loadOp.tile.tmem] = loadOp;
+
+            switch (loadOp.type) {
+            case LoadOperation::Type::Block:
+                rdp->loadBlockOperation(loadOp.tile, loadOp.texture, false);
+                break;
+            case LoadOperation::Type::Tile:
+                rdp->loadTileOperation(loadOp.tile, loadOp.texture, false);
+                break;
+            case LoadOperation::Type::TLUT:
+                rdp->loadTLUTOperation(loadOp.tile, loadOp.texture, false);
+                break;
+            };
+        };
+
+        auto uploadTile = [&](uint32_t rdpTileIndex, FramebufferPair &fbPair, const DrawCall &drawCall) {
             auto &callTile = workload.drawData.callTiles[rdpTileIndex];
             if (!callTile.valid) {
                 return;
@@ -810,9 +811,7 @@ namespace RT64 {
                 else if (callTile.rawTMEM) {
                     callTile.tmemHashOrID = textureManager.uploadTMEM(this, callTile.loadTile, ext.textureCache, workload.submissionFrame, 0, RDP_TMEM_BYTES, callTile.sampleWidth, callTile.sampleHeight, callTile.tlut);
 #               if RT64_INTERPOLATE_RECT_SCROLLS
-                    if (rect) {
-                        callTile.sampledHash = sampledHash(callTile);
-                    }
+                    callTile.sampledHash = sampledHash(callTile);
 #               endif
                 }
                 else {
@@ -914,7 +913,7 @@ namespace RT64 {
                 if (gameCall.callDesc.tileCount > 0) {
                     const uint32_t rdpTileLimit = gameCall.callDesc.tileIndex + gameCall.callDesc.tileCount;
                     while (rdpTileCursor < rdpTileLimit) {
-                        uploadTile(rdpTileCursor, fbPair, gameCall.callDesc, proj.type == Projection::Type::Rectangle);
+                        uploadTile(rdpTileCursor, fbPair, gameCall.callDesc);
                         rdpTileCursor++;
                     }
                 }
