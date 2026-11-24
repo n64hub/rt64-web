@@ -1304,6 +1304,83 @@ namespace RT64 {
             }
         }
 
+        // A stray in a run of look-alikes: where three or more paired rects drawn one after another drew the same
+        // picture (the same textures, size and scale, the same texels at their corners), and more than half of them
+        // moved alike, within 3/8 of their longer side of the run's middle move each way together, one that moved
+        // farther from it is a rect gone and another come, not one rect moved, and is left unpaired, drawn where the
+        // game put it. A particle system draws its particles in the order of their slots and puts a new one in the slot
+        // of one gone, so the order (a rect's own) gives a particle come for its own one gone elsewhere, and where
+        // particles came or went the nearest look-alike is often another: Excitebike 64 draws the smoke over a campfire
+        // as a column of a dozen and more puffs, one born at the bottom as one goes at the top every few game frames,
+        // and the frames between slid a puff or two 8 to 19 pixels up or down the column, or two past each other, as
+        // the rest drifted a pixel or stayed, so the column stepped once a game frame. Text is drawn a glyph at a time,
+        // and three of a glyph one after another are of one word, which moves whole.
+        if (!untextured) {
+            thread_local std::vector<size_t> runPaired;
+            thread_local std::vector<int32_t> runMoveX;
+            thread_local std::vector<int32_t> runMoveY;
+            auto moveOf = [&](size_t r, bool vertical) {
+                const DrawCall &curCall = *curRects[r].call;
+                const DrawCall &prevCall = *prevRects[curFound[r]].call;
+                return vertical ? (curCall.gameRect.uly - prevCall.gameRect.uly) : (curCall.gameRect.ulx - prevCall.gameRect.ulx);
+            };
+
+            size_t start = 0;
+            while (start < curRects.size()) {
+                if ((curFound[start] == prevRects.size()) || !sameTextures(*curRects[start].call, *prevRects[curFound[start]].call) ||
+                    !sameCorners(curRects[start], prevRects[curFound[start]], false))
+                {
+                    start++;
+                    continue;
+                }
+
+                // The run, named by its first rect's pair; a rect of it left unpaired stays in it.
+                const RectCall &named = prevRects[curFound[start]];
+                runPaired.clear();
+                runMoveX.clear();
+                runMoveY.clear();
+                size_t end = start;
+                while ((end < curRects.size()) && sameTextures(*curRects[end].call, *named.call) && sameCorners(curRects[end], named, false)) {
+                    if ((curFound[end] < prevRects.size()) && sameTextures(*curRects[end].call, *prevRects[curFound[end]].call)) {
+                        runPaired.push_back(end);
+                        runMoveX.push_back(moveOf(end, false));
+                        runMoveY.push_back(moveOf(end, true));
+                    }
+
+                    end++;
+                }
+
+                const size_t n = runPaired.size();
+                if (n >= 3) {
+                    std::nth_element(runMoveX.begin(), runMoveX.begin() + n / 2, runMoveX.end());
+                    std::nth_element(runMoveY.begin(), runMoveY.begin() + n / 2, runMoveY.end());
+                    const int32_t middleX = runMoveX[n / 2];
+                    const int32_t middleY = runMoveY[n / 2];
+                    const DrawCall &first = *curRects[start].call;
+                    const int32_t side = std::max(first.gameRect.lrx - first.gameRect.ulx, first.gameRect.lry - first.gameRect.uly);
+                    const int32_t strayBy = std::max(side * 3 / 8, 8);
+                    auto strays = [&](size_t r) {
+                        return (abs(moveOf(r, false) - middleX) + abs(moveOf(r, true) - middleY)) > strayBy;
+                    };
+
+                    size_t alike = 0;
+                    for (size_t r : runPaired) {
+                        alike += strays(r) ? 0 : 1;
+                    }
+
+                    if ((alike * 2) > n) {
+                        for (size_t r : runPaired) {
+                            if (strays(r)) {
+                                curFound[r] = prevRects.size();
+                            }
+                        }
+                    }
+                }
+
+                start = end;
+            }
+        }
+
         // A textured rect that moved, with a look the frame before drew more than once (a glyph of a font page), is
         // left unpaired where its line has at least three times as many rects left unpaired as rects that moved with
         // it, by the same amount within a pixel: a line of text moves whole, and a glyph paired while most of its line
