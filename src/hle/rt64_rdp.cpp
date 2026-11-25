@@ -1282,11 +1282,24 @@ namespace RT64 {
             const bool thinX = false;
             const bool thinY = false;
 #       endif
-            if (!thinX && (abs(scissorRect.lrx - lrx) <= 4) && (ulx < scissorRect.lrx)) {
+#       if RT64_FIX_LR_SPANNING_RECTS
+            // A rect a pixel short of filling the screen spans the scissor across the other axis: a full-screen
+            // rect, a strip of a background. One that doesn't only happens to end a pixel above or left of the
+            // scissor's edge, and stretched, it draws a row or column more from the texels past its own. Excitebike
+            // 64 draws its HUD's glyphs from a font page with an unwritten row under each glyph, and while its
+            // scissor ends a row below them (a race's countdown) each glyph a row taller than the rest drew that row
+            // too: dashes under the 0s of its time, which then reached two rows below the 9s and 7s beside them.
+            const bool spansX = (ulx <= (scissorRect.ulx + 4)) && (lrx >= (scissorRect.lrx - 4));
+            const bool spansY = (uly <= (scissorRect.uly + 4)) && (lry >= (scissorRect.lry - 4));
+#       else
+            const bool spansX = true;
+            const bool spansY = true;
+#       endif
+            if (!thinX && spansY && (abs(scissorRect.lrx - lrx) <= 4) && (ulx < scissorRect.lrx)) {
                 lrx = scissorRect.lrx;
             }
 
-            if (!thinY && (abs(scissorRect.lry - lry) <= 4) && (uly < scissorRect.lry)) {
+            if (!thinY && spansX && (abs(scissorRect.lry - lry) <= 4) && (uly < scissorRect.lry)) {
                 lry = scissorRect.lry;
             }
         }
