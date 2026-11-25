@@ -1130,11 +1130,219 @@ namespace RT64 {
             curOwn[c] = ((c < head) && (c != p)) ? prevRects.size() : p;
         }
 
-        // Every rect that drew the same place pairs first, so one that stayed put never pairs with a look-alike that moved.
         thread_local std::vector<size_t> curFound;
         curFound.assign(curRects.size(), prevRects.size());
+
+        // A row of tiles: eight or more textured rects of one size and scale drawn one after another, each beginning
+        // where the one before ends, on one line, as a tile map is drawn (a 2D game's scrolling background, a rect per
+        // tile of its name table). The game scrolls the row whole, so it pairs whole, first and before anything else:
+        // with the row the frame before drew on the same line at the same tile size, shifted by the one step less than
+        // a tile either way that leaves the fewest of the tiles the two rows share on a tile of another look
+        // (sameTextures), where most of them are on one of the same look. A tile map is the same few tiles over and
+        // over (a track's dirt, a crowd), and as the scroll crossed a tile's width the rect in a tile's place in the
+        // order (its own) or the nearest look-alike was the tile beside it: Excitebike 64's Original Excitebike draws
+        // its playfield a row of 8 pixel tiles at a time, scrolled 1 to 5 pixels a game frame, and the frames between
+        // slid a tile 5 pixels back where its row moved 3 forward, or left a row unpaired, held still while the rows
+        // above and below it slid, so the playfield wobbled and shimmered as it scrolled. By the fewest left over, not
+        // the most matched: a row 31 tiles long in one frame and 32 in the next shares a tile more one way than the
+        // other, and a row of one tile throughout went that way, a tile's width off the rows around it. Where both
+        // steps leave as few (a row of one tile throughout), the step most of the frame's decided rows of that tile
+        // size took decides, or else the smaller; a row whose two steps are half a tile each way and tie stays to the
+        // passes below. A tile of the row on no tile of its look (one just come in at the screen's edge, or changed)
+        // has no pair, and is still drawn the row's step from where it is, so it comes in with the row (rowMoves,
+        // below).
+        thread_local std::vector<bool> curInRow;
+        thread_local std::vector<int32_t> curRowMove;
+        curInRow.assign(curRects.size(), false);
+        curRowMove.assign(curRects.size(), 0);
+        if (!untextured) {
+            struct TileRow {
+                size_t first;
+                size_t count;
+            };
+
+            auto rowsOf = [](const std::vector<RectCall> &rects, std::vector<TileRow> &rows) {
+                const size_t MinRowTiles = 8;
+                rows.clear();
+                size_t start = 0;
+                while (start < rects.size()) {
+                    size_t end = start + 1;
+                    while (end < rects.size()) {
+                        const DrawCall &a = *rects[end - 1].call;
+                        const DrawCall &b = *rects[end].call;
+                        if ((b.gameRect.ulx != a.gameRect.lrx) || (b.gameRect.uly != a.gameRect.uly) || (b.gameRect.lry != a.gameRect.lry) ||
+                            ((b.gameRect.lrx - b.gameRect.ulx) != (a.gameRect.lrx - a.gameRect.ulx)) || (b.rectDsdx != a.rectDsdx) || (b.rectDtdy != a.rectDtdy))
+                        {
+                            break;
+                        }
+
+                        end++;
+                    }
+
+                    const DrawCall &first = *rects[start].call;
+                    if (((end - start) >= MinRowTiles) && (first.gameRect.lrx > first.gameRect.ulx) && (first.gameRect.lry > first.gameRect.uly)) {
+                        rows.push_back({ start, end - start });
+                    }
+
+                    start = end;
+                }
+            };
+
+            thread_local std::vector<TileRow> curRows;
+            thread_local std::vector<TileRow> prevRows;
+            rowsOf(curRects, curRows);
+            rowsOf(prevRects, prevRows);
+
+            // By row of this frame: its row of the frame before, its two steps (in quarter pixels, the frame before's
+            // place less this one's) and how many tiles each puts on a tile of the same look, of how many shared.
+            struct RowPair {
+                size_t prevRow;
+                int32_t step[2];
+                size_t same[2];
+                size_t shared[2];
+                int chosen;
+            };
+
+            thread_local std::vector<RowPair> rowPairs;
+            rowPairs.clear();
+            const size_t NoRow = SIZE_MAX;
+            for (const TileRow &row : curRows) {
+                const DrawCall &cFirst = *curRects[row.first].call;
+                const int32_t width = cFirst.gameRect.lrx - cFirst.gameRect.ulx;
+                const int32_t cUl = cFirst.gameRect.ulx;
+                const int32_t cLr = cUl + width * int32_t(row.count);
+                RowPair pair = { NoRow, { 0, 0 }, { 0, 0 }, { 0, 0 }, -1 };
+                int32_t bestOverlap = 0;
+                for (size_t q = 0; q < prevRows.size(); q++) {
+                    const DrawCall &pFirst = *prevRects[prevRows[q].first].call;
+                    const int32_t pUl = pFirst.gameRect.ulx;
+                    const int32_t pLr = pUl + width * int32_t(prevRows[q].count);
+                    const int32_t overlap = std::min(cLr, pLr) - std::max(cUl, pUl);
+                    if ((pFirst.gameRect.uly != cFirst.gameRect.uly) || (pFirst.gameRect.lry != cFirst.gameRect.lry) ||
+                        ((pFirst.gameRect.lrx - pFirst.gameRect.ulx) != width) || (pFirst.rectDsdx != cFirst.rectDsdx) || (pFirst.rectDtdy != cFirst.rectDtdy) ||
+                        (overlap <= bestOverlap))
+                    {
+                        continue;
+                    }
+
+                    bestOverlap = overlap;
+                    pair.prevRow = q;
+                }
+
+                if (pair.prevRow != NoRow) {
+                    const TileRow &prevRow = prevRows[pair.prevRow];
+                    const int32_t pUl = prevRects[prevRow.first].call->gameRect.ulx;
+                    const int32_t forward = (((pUl - cUl) % width) + width) % width;
+                    pair.step[0] = forward;
+                    pair.step[1] = forward - width;
+                    for (int s = 0; s < ((forward == 0) ? 1 : 2); s++) {
+                        for (size_t i = 0; i < row.count; i++) {
+                            const int32_t at = cUl + width * int32_t(i) + pair.step[s] - pUl;
+                            const int32_t j = at / width;
+                            if ((at < 0) || (j >= int32_t(prevRow.count))) {
+                                continue;
+                            }
+
+                            pair.shared[s]++;
+                            pair.same[s] += sameTextures(*curRects[row.first + i].call, *prevRects[prevRow.first + j].call) ? 1 : 0;
+                        }
+                    }
+
+                    const bool both = (forward != 0);
+                    const bool decided0 = (pair.same[0] * 2) > pair.shared[0];
+                    const bool decided1 = both && ((pair.same[1] * 2) > pair.shared[1]);
+                    const size_t off0 = pair.shared[0] - pair.same[0];
+                    const size_t off1 = pair.shared[1] - pair.same[1];
+                    if (decided0 && (!decided1 || (off0 < off1))) {
+                        pair.chosen = 0;
+                    }
+                    else if (decided1 && (!decided0 || (off1 < off0))) {
+                        pair.chosen = 1;
+                    }
+                    else if (decided0 && decided1) {
+                        pair.chosen = 2; // A tie, decided below.
+                    }
+                }
+
+                rowPairs.push_back(pair);
+            }
+
+            // A tie takes the step most rows of its tile size decided on took, or else the smaller.
+            for (size_t k = 0; k < curRows.size(); k++) {
+                RowPair &pair = rowPairs[k];
+                if (pair.chosen != 2) {
+                    continue;
+                }
+
+                const DrawCall &cFirst = *curRects[curRows[k].first].call;
+                const int32_t width = cFirst.gameRect.lrx - cFirst.gameRect.ulx;
+                size_t votes[2] = { 0, 0 };
+                for (size_t m = 0; m < curRows.size(); m++) {
+                    const RowPair &other = rowPairs[m];
+                    const DrawCall &oFirst = *curRects[curRows[m].first].call;
+                    if ((other.chosen != 0) && (other.chosen != 1)) {
+                        continue;
+                    }
+
+                    if ((oFirst.gameRect.lrx - oFirst.gameRect.ulx) != width) {
+                        continue;
+                    }
+
+                    const int32_t step = other.step[other.chosen];
+                    votes[0] += (step == pair.step[0]) ? 1 : 0;
+                    votes[1] += (step == pair.step[1]) ? 1 : 0;
+                }
+
+                if (votes[0] != votes[1]) {
+                    pair.chosen = (votes[0] > votes[1]) ? 0 : 1;
+                }
+                else if (abs(pair.step[0]) != abs(pair.step[1])) {
+                    pair.chosen = (abs(pair.step[0]) < abs(pair.step[1])) ? 0 : 1;
+                }
+                else {
+                    pair.chosen = -1;
+                }
+            }
+
+            for (size_t k = 0; k < curRows.size(); k++) {
+                const RowPair &pair = rowPairs[k];
+                if ((pair.chosen != 0) && (pair.chosen != 1)) {
+                    continue;
+                }
+
+                const TileRow &row = curRows[k];
+                const TileRow &prevRow = prevRows[pair.prevRow];
+                const DrawCall &cFirst = *curRects[row.first].call;
+                const int32_t width = cFirst.gameRect.lrx - cFirst.gameRect.ulx;
+                const int32_t cUl = cFirst.gameRect.ulx;
+                const int32_t pUl = prevRects[prevRow.first].call->gameRect.ulx;
+                const int32_t step = pair.step[pair.chosen];
+                for (size_t i = 0; i < row.count; i++) {
+                    const size_t r = row.first + i;
+                    curInRow[r] = true;
+                    curRowMove[r] = step;
+                    const int32_t at = cUl + width * int32_t(i) + step - pUl;
+                    const int32_t j = at / width;
+                    if ((at < 0) || (j >= int32_t(prevRow.count))) {
+                        continue;
+                    }
+
+                    const size_t p = prevRow.first + size_t(j);
+                    if (!prevUsed[p] && sameTextures(*curRects[r].call, *prevRects[p].call)) {
+                        curFound[r] = p;
+                        prevUsed[p] = true;
+                    }
+                }
+            }
+        }
+
+        // Every rect that drew the same place pairs first, so one that stayed put never pairs with a look-alike that moved.
         size_t searchStart = 0;
         for (size_t r = 0; r < curRects.size(); r++) {
+            if (curInRow[r]) {
+                continue;
+            }
+
             const size_t own = curOwn[r];
             if (own < prevRects.size()) {
                 const DrawCall &ownCall = *prevRects[own].call;
@@ -1170,7 +1378,7 @@ namespace RT64 {
         }
 
         for (size_t r = 0; r < curRects.size(); r++) {
-            if (curFound[r] < prevRects.size()) {
+            if ((curFound[r] < prevRects.size()) || curInRow[r]) {
                 continue;
             }
 
@@ -1246,7 +1454,7 @@ namespace RT64 {
         }
 
         for (size_t r = 0; (r < curRects.size()) && !untextured; r++) {
-            if (curFound[r] < prevRects.size()) {
+            if ((curFound[r] < prevRects.size()) || curInRow[r]) {
                 continue;
             }
 
@@ -1276,7 +1484,7 @@ namespace RT64 {
         thread_local std::vector<bool> curScaled;
         curScaled.assign(curRects.size(), false);
         for (size_t r = 0; (r < curRects.size()) && !untextured; r++) {
-            if (curFound[r] < prevRects.size()) {
+            if ((curFound[r] < prevRects.size()) || curInRow[r]) {
                 continue;
             }
 
@@ -1371,7 +1579,7 @@ namespace RT64 {
 
                     if ((alike * 2) > n) {
                         for (size_t r : runPaired) {
-                            if (strays(r)) {
+                            if (strays(r) && !curInRow[r]) {
                                 curFound[r] = prevRects.size();
                             }
                         }
@@ -1473,7 +1681,7 @@ namespace RT64 {
             curAlone.assign(curRects.size(), false);
             for (size_t r = 0; r < curRects.size(); r++) {
                 const size_t root = rootOf(r);
-                if ((curFound[r] == prevRects.size()) || (lineUnpaired[root] == 0)) {
+                if ((curFound[r] == prevRects.size()) || (lineUnpaired[root] == 0) || curInRow[r]) {
                     continue;
                 }
 
@@ -1513,6 +1721,22 @@ namespace RT64 {
                     curScaled[r] = false;
                 }
             }
+        }
+
+        // A tile of a row of tiles that paired with no tile of its look (above) is drawn the row's step from where it
+        // is, so it comes in, or changes, sliding with the row; its texels are this frame's.
+        for (size_t r = 0; r < curRects.size(); r++) {
+            if (!curInRow[r] || (curFound[r] < prevRects.size()) || (curRowMove[r] == 0)) {
+                continue;
+            }
+
+            const DrawCall &curCall = *curRects[r].call;
+            if (workloadMap.rectMoves.size() <= curCall.callIndex) {
+                workloadMap.rectMoves.resize(curCall.callIndex + 1, hlslpp::float4(0.0f, 0.0f, 0.0f, 0.0f));
+            }
+
+            const float move = float(curRowMove[r]) / 4.0f;
+            workloadMap.rectMoves[curCall.callIndex] = hlslpp::float4(move, 0.0f, move, 0.0f);
         }
 
         // By a rect's index, the texcoords its upper left moved by from the frame before when its texture slides by
@@ -1645,7 +1869,7 @@ namespace RT64 {
             };
 
             bool replaced = false;
-            if (moved && !untextured && (prevCall.gameRect.uly == curCall.gameRect.uly)) {
+            if (moved && !untextured && !curInRow[r] && (prevCall.gameRect.uly == curCall.gameRect.uly)) {
                 bool placeTaken = false;
                 for (size_t k = 0; (k < prevRects.size()) && !placeTaken; k++) {
                     const DrawCall &placeCall = *prevRects[k].call;
