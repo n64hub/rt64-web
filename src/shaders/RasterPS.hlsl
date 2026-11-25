@@ -230,17 +230,22 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
 
 #if defined(RECT_OWN_PIXEL_GRID)
     // RT64_RECT_OWN_PIXEL_GRID (on with WGSL): a texrect's low resolution UV steps a native pixel at a time from the
-    // rect's own left and top edges, not on the screen's grid above, each native pixel as wide as the renderer drew the
-    // rect: a stretched rect's are wider than tall, and on that grid its first pixels sampled the texel before its
-    // first. The draw's rectPixelGrid (rt64_render_indices.h) holds the width and where the edges fall in the native
-    // pixel, 0 for no rect. A pixel belongs to the native pixel its center is in.
-    const uint rectPixelGrid = instanceRenderIndices[RENDER_INDEX].rectPixelGrid;
-    if (renderFlagRect(rp.flags) && !renderFlagUpscale2D(rp.flags) && ((rectPixelGrid & 0xFFFFU) != 0)) {
-        const float2 nativePixel = float2(float(rectPixelGrid & 0xFFFFU) / 256.0f, FbParams.resolutionScale.y);
-        const float2 edgePhase = float2((rectPixelGrid >> 16U) & 0xFFU, rectPixelGrid >> 24U) / 256.0f * nativePixel;
-        const float2 fromEdge = floor(vertexPosition.xy) - edgePhase;
-        const float2 inNativePixel = fromEdge - floor((fromEdge + 0.5f) / nativePixel) * nativePixel;
-        lowResUV = vertexUV - inNativePixel * float2(ddxVertexUV.x, ddyVertexUV.y);
+    // rect's own first texcoords, as the RDP steps them from the rect's corner, not on the screen's grid above: a pixel
+    // takes the texcoords its native pixel starts at, the rect's first and a whole number of its steps (its dsdx and
+    // dtdy), the native pixel being the one whose span of texcoords the pixel's center is in. So the native pixels
+    // are as wide as the renderer drew the rect, which is placed on whole pixels of the screen: a stretched rect's are
+    // wider than tall, and on the screen's grid its first pixels sampled the texel before its first, and a rect drawn
+    // a pixel wider or narrower than its scale makes it (537.6 rounded to 538 at 12.8 a native pixel) had its texels
+    // drift off a grid stepped at the scale's width, a column lost or doubled across it. The draw's render indices
+    // (rt64_render_indices.h) hold the first texcoords and the steps, 0 for no rect; an axis that doesn't step keeps
+    // the first.
+    const RenderIndices gridIndices = instanceRenderIndices[RENDER_INDEX];
+    const float2 gridStep = float2(gridIndices.rectGridStepU, gridIndices.rectGridStepV);
+    if (renderFlagRect(rp.flags) && !renderFlagUpscale2D(rp.flags) && any(gridStep != 0.0f)) {
+        const float2 gridOrigin = float2(gridIndices.rectGridU, gridIndices.rectGridV);
+        const float2 centerUV = vertexUV + 0.5f * (ddxVertexUV + ddyVertexUV);
+        const float2 safeStep = gridStep + float2(gridStep == 0.0f);
+        lowResUV = gridOrigin + floor((centerUV - gridOrigin) / safeStep) * gridStep;
     }
 #endif
 

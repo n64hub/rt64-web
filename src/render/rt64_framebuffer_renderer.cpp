@@ -1859,26 +1859,28 @@ namespace RT64 {
                             }
 #                       endif
 #                       if RT64_RECT_OWN_PIXEL_GRID
-                            // The rect's texture steps a native pixel at a time from its own left and top edges, where
-                            // the lines above draw it, as the RDP steps it from the rect's corner (RasterPS.hlsl). Its
-                            // native pixel is as wide as its scale makes it: a rect stretched across a picture wider than
-                            // 4:3 has them wider than tall, and on the screen's grid, as wide as tall, its first pixels
-                            // sampled before its first texel, which a wrapped tile reads from its other side. Its width
-                            // in 256ths of a pixel, then where its left and top edges fall in its native pixel, in 256ths
-                            // of it.
+                            // The rect's texture steps a native pixel at a time from its own first texcoords, as the RDP
+                            // steps it from the rect's corner (RasterPS.hlsl): its texcoords at its first pixel and its
+                            // dsdx and dtdy in texels (a copy rect's already a quarter of the game's, RDP::drawTexRect).
+                            // On the screen's grid, a rect stretched across a picture wider than 4:3 sampled before its
+                            // first texel, which a wrapped tile reads from its other side. On a grid of the scale's
+                            // width, its texels drifted from where the rect draws them, placed on whole pixels
+                            // (convertViewportRect) and so a pixel wider or narrower than the scale makes it: Excitebike
+                            // 64's HUD glyphs at 1400x720 each showed a texel late, the one before as a line at its left,
+                            // and Original Excitebike's NES picture at 4096x2160 lost or doubled a column in its letters
+                            // in some of its tiles.
                             {
-                                const float pixelWidth = invRatioScale * p.resolutionScale.x;
-                                const float pixelHeight = p.resolutionScale.y;
-                                const float rectLeft = (triangles.screenOffset.x - halfPixelOffset.x - triangles.screenScale.x + 1.0f) * halfViewportSize.x;
-                                const float rectTop = (1.0f - (triangles.screenOffset.y - halfPixelOffset.y) - triangles.screenScale.y) * halfViewportSize.y;
-                                auto edgePhase = [](float edge, float period) {
-                                    float phase = std::fmod(edge, period) / period;
-                                    phase = (phase < 0.0f) ? (phase + 1.0f) : phase;
-                                    return uint32_t(std::lround(phase * 256.0f)) & 0xFFU;
-                                };
-
-                                const uint32_t width = uint32_t(std::clamp(std::lround(pixelWidth * 256.0f), 1L, 0xFFFFL));
-                                renderIndicesVector.back().rectPixelGrid = width | (edgePhase(rectLeft, pixelWidth) << 16U) | (edgePhase(rectTop, pixelHeight) << 24U);
+                                const uint32_t gridCycleType = call.callDesc.otherMode.cycleType();
+                                if ((call.callDesc.triangleCount == 2) && (gridCycleType != G_CYC_FILL) &&
+                                    ((size_t(call.meshDesc.rawVertexStart) + 6) * 2 <= drawData.triTcFloats.size()))
+                                {
+                                    const float *rectTc = &drawData.triTcFloats[size_t(call.meshDesc.rawVertexStart) * 2];
+                                    interop::RenderIndices &gridIndices = renderIndicesVector.back();
+                                    gridIndices.rectGridU = rectTc[0];
+                                    gridIndices.rectGridV = rectTc[1];
+                                    gridIndices.rectGridStepU = float(call.callDesc.rectDsdx) / 1024.0f;
+                                    gridIndices.rectGridStepV = float(call.callDesc.rectDtdy) / 1024.0f;
+                                }
                             }
 #                       endif
 
