@@ -24,6 +24,20 @@ namespace interop {
 #else
         uint rectPixelGrid;
 #endif
+        // RT64_UPSCALED_RECT_LAST_TEXEL: the box of texcoords a texrect drawn upscaled samples, from its first pixel's to
+        // its last's on the RDP (RasterPS.hlsl); a max below its min for every other draw, and in every build without
+        // the option, whose shaders don't read it. In every build all the same, as rectPixelGrid is.
+#ifdef HLSL_CPU
+        float rectTexelMinU = 0.0f;
+        float rectTexelMinV = 0.0f;
+        float rectTexelMaxU = -1.0f;
+        float rectTexelMaxV = -1.0f;
+#else
+        float rectTexelMinU;
+        float rectTexelMinV;
+        float rectTexelMaxU;
+        float rectTexelMaxV;
+#endif
     };
 #ifdef HLSL_CPU
 };

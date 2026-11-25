@@ -1882,6 +1882,36 @@ namespace RT64 {
                             }
 #                       endif
 
+#                       if RT64_UPSCALED_RECT_LAST_TEXEL
+                            // A texrect drawn upscaled (Upscale 2D) samples its texture along the whole of each native
+                            // pixel, its last one's too: there it steps on from the texel the RDP's last pixel samples
+                            // toward the texcoords at the rect's far edge, a pixel's step further. A game that shrinks a
+                            // picture by stepping its rect over more texels a pixel steps that far past the picture, into
+                            // the next one on its texture page, a line along the rect's right or bottom edge drawn only
+                            // at a high resolution. The box from its first texcoords to its last pixel's, its far ones
+                            // less a step (its first alone for a rect a step or less across), keeps it to the texels the
+                            // RDP samples (RasterPS.hlsl). Each axis steps by its own dsdx or dtdy, flipped or not.
+                            if (call.shaderDesc.flags.upscale2D && (call.callDesc.triangleCount == 2) &&
+                                (cycleType != G_CYC_FILL) && (cycleType != G_CYC_COPY) &&
+                                ((size_t(call.meshDesc.rawVertexStart) + 6) * 2 <= drawData.triTcFloats.size()))
+                            {
+                                const float *rectTc = &drawData.triTcFloats[size_t(call.meshDesc.rawVertexStart) * 2];
+                                auto lastTexel = [](float first, float far, int16_t step) {
+                                    const float stepTexels = fabsf(float(step)) / 1024.0f;
+                                    const float span = far - first;
+                                    return (fabsf(span) <= stepTexels) ? first : (far - copysignf(stepTexels, span));
+                                };
+
+                                const float lastU = lastTexel(rectTc[0], rectTc[6], call.callDesc.rectDsdx);
+                                const float lastV = lastTexel(rectTc[1], rectTc[7], call.callDesc.rectDtdy);
+                                interop::RenderIndices &indices = renderIndicesVector.back();
+                                indices.rectTexelMinU = std::min(rectTc[0], lastU);
+                                indices.rectTexelMinV = std::min(rectTc[1], lastV);
+                                indices.rectTexelMaxU = std::max(rectTc[0], lastU);
+                                indices.rectTexelMaxV = std::max(rectTc[1], lastV);
+                            }
+#                       endif
+
                             if (p.postBlendNoise) {
                                 // Indicate if post blend dither noise should be applied.
                                 bool rgbDitherNoise = (call.shaderDesc.otherMode.rgbDither() == G_CD_NOISE);

@@ -244,6 +244,19 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
     }
 #endif
 
+#if defined(UPSCALED_RECT_LAST_TEXEL)
+    // RT64_UPSCALED_RECT_LAST_TEXEL (on with WGSL): a texrect drawn upscaled is kept to the texels the RDP samples, the
+    // box from its first pixel's texcoords to its last's that the renderer gives it (rt64_render_indices.h): its last
+    // native pixel, drawn at a high resolution, otherwise steps on toward its far edge's, past the picture it shows.
+    const RenderIndices rectIndices = instanceRenderIndices[RENDER_INDEX];
+    if (renderFlagRect(rp.flags) && renderFlagUpscale2D(rp.flags) && (rectIndices.rectTexelMaxU >= rectIndices.rectTexelMinU)) {
+        const float2 texelMin = float2(rectIndices.rectTexelMinU, rectIndices.rectTexelMinV);
+        const float2 texelMax = float2(rectIndices.rectTexelMaxU, rectIndices.rectTexelMaxV);
+        lowResUV = clamp(lowResUV, texelMin, texelMax);
+        highResUV = clamp(highResUV, texelMin, texelMax);
+    }
+#endif
+
     int tileIndex0 = 0;
     int tileIndex1 = 1;
     float lodFraction;
