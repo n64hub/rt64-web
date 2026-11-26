@@ -8,7 +8,7 @@
 #include "hle/rt64_workload_queue.h"
 
 namespace RT64 {
-#if RT64_INTERPOLATE_CAMERA_EYE || RT64_SLERP_CAMERA_ROTATION
+#if RT64_INTERPOLATE_CAMERA_EYE
     // The eye of a view matrix, the point it moves to the origin, or false for a view without one (a zero matrix).
     inline bool viewEye(const hlslpp::float4x4 &view, hlslpp::float3 &eye) {
         eye = -hlslpp::mul(hlslpp::float3(view[3].xyz), hlslpp::inverse(extract3x3(view)));
@@ -30,10 +30,16 @@ namespace RT64 {
     // when the position isn't interpolated), or false when the two can't be decomposed or one is mirrored and the
     // other isn't.
     inline bool slerpView(const RigidBody &rigidBody, const hlslpp::float4x4 &prev, const hlslpp::float4x4 &cur, float weight, interop::float4x4 &view) {
+        // The eye, the point a view moves to the origin, is kept apart from the axes and put back after the turn.
+        auto eyeOf = [](const hlslpp::float4x4 &m, hlslpp::float3 &eye) {
+            eye = -hlslpp::mul(hlslpp::float3(m[3].xyz), hlslpp::inverse(extract3x3(m)));
+            return std::isfinite(float(eye.x)) && std::isfinite(float(eye.y)) && std::isfinite(float(eye.z));
+        };
+
         const DecomposedTransform a(prev);
         const DecomposedTransform b(cur);
         hlslpp::float3 prevEye, curEye;
-        if (!a.valid || !b.valid || (a.coordinateFlip != b.coordinateFlip) || !viewEye(prev, prevEye) || !viewEye(cur, curEye)) {
+        if (!a.valid || !b.valid || (a.coordinateFlip != b.coordinateFlip) || !eyeOf(prev, prevEye) || !eyeOf(cur, curEye)) {
             return false;
         }
 
@@ -73,7 +79,11 @@ namespace RT64 {
 
         lerped.rotation = hlslpp::quaternion(q[0] / length, q[1] / length, q[2] / length, q[3] / length);
         view = recomposeMatrix(lerped.rotation, lerped.scale, lerped.skew, hlslpp::float3(0.0f, 0.0f, 0.0f), lerped.perspective);
-        setViewEye(view, rigidBody.lerpTranslation ? hlslpp::lerp(prevEye, curEye, weight) : curEye);
+        const hlslpp::float3 eye = rigidBody.lerpTranslation ? hlslpp::lerp(prevEye, curEye, weight) : curEye;
+        const hlslpp::float3 translation = -hlslpp::mul(eye, extract3x3(view));
+        view[3][0] = translation.x;
+        view[3][1] = translation.y;
+        view[3][2] = translation.z;
         return true;
     }
 #endif
@@ -357,6 +367,9 @@ namespace RT64 {
                 adjustProjectionMatrix(adjustedPrevProj, projRatioScale);
                 viewMatrix = rigidBody->lerp(p.curFrameWeight, *prevViewMatrix, curViewTransform, true);
                 prevViewTransform = rigidBody->lerp(p.prevFrameWeight, *prevViewMatrix, curViewTransform, true);
+
+                // We only interpolate the projection if the view matrix has been interpolated.
+                const bool interpolateProjection = rigidBody->lerpTranslation || rigidBody->lerpRotation;
 #           if RT64_SLERP_CAMERA_ROTATION
                 // Without a matrix group that decomposes the view, RigidBody::lerp lerps its rotation a component at a time,
                 // which shrinks what the two rotations have apart by the cosine of half the angle between them in the frames
@@ -374,9 +387,6 @@ namespace RT64 {
                     }
                 }
 #           endif
-
-                // We only interpolate the projection if the view matrix has been interpolated.
-                const bool interpolateProjection = rigidBody->lerpTranslation || rigidBody->lerpRotation;
 #           if RT64_INTERPOLATE_CAMERA_EYE
                 // The view's translation is the eye in the view's own axes, so lerping it took the eye of a camera far from the
                 // world's origin off the line between its two places as the camera turned, and what is near the camera swung
