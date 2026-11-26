@@ -8,7 +8,7 @@
 #include "hle/rt64_workload_queue.h"
 
 namespace RT64 {
-#if RT64_INTERPOLATE_CAMERA_EYE
+#if RT64_INTERPOLATE_CAMERA_EYE || RT64_SLERP_CAMERA_ROTATION
     // The eye of a view matrix, the point it moves to the origin, or false for a view without one (a zero matrix).
     inline bool viewEye(const hlslpp::float4x4 &view, hlslpp::float3 &eye) {
         eye = -hlslpp::mul(hlslpp::float3(view[3].xyz), hlslpp::inverse(extract3x3(view)));
@@ -21,6 +21,60 @@ namespace RT64 {
         view[3][0] = translation.x;
         view[3][1] = translation.y;
         view[3][2] = translation.z;
+    }
+#endif
+
+#if RT64_SLERP_CAMERA_ROTATION
+    // A view between two game frames' views, its axes turned from the one's to the other's at a constant rate (a
+    // slerp of their rotations, their scales lerped), and its eye on the line between the two eyes (the current one
+    // when the position isn't interpolated), or false when the two can't be decomposed or one is mirrored and the
+    // other isn't.
+    inline bool slerpView(const RigidBody &rigidBody, const hlslpp::float4x4 &prev, const hlslpp::float4x4 &cur, float weight, interop::float4x4 &view) {
+        const DecomposedTransform a(prev);
+        const DecomposedTransform b(cur);
+        hlslpp::float3 prevEye, curEye;
+        if (!a.valid || !b.valid || (a.coordinateFlip != b.coordinateFlip) || !viewEye(prev, prevEye) || !viewEye(cur, curEye)) {
+            return false;
+        }
+
+        DecomposedTransform lerped = lerpTransforms(a, b, weight, false, false, rigidBody.lerpScale, rigidBody.lerpSkew, rigidBody.lerpPerspective, false);
+        float qa[4] = { float(a.rotation.x), float(a.rotation.y), float(a.rotation.z), float(a.rotation.w) };
+        float qb[4] = { float(b.rotation.x), float(b.rotation.y), float(b.rotation.z), float(b.rotation.w) };
+        float cosTheta = qa[0] * qb[0] + qa[1] * qb[1] + qa[2] * qb[2] + qa[3] * qb[3];
+        if (cosTheta < 0.0f) {
+            for (float &q : qb) {
+                q = -q;
+            }
+
+            cosTheta = -cosTheta;
+        }
+
+        // hlslpp's slerp moves along the chord by a ratio of sines, not along the arc, so the weights are taken here.
+        float wa = 1.0f - weight;
+        float wb = weight;
+        if (cosTheta < 0.9999f) {
+            const float theta = std::acos(cosTheta);
+            const float sinTheta = std::sin(theta);
+            wa = std::sin((1.0f - weight) * theta) / sinTheta;
+            wb = std::sin(weight * theta) / sinTheta;
+        }
+
+        float q[4];
+        float length = 0.0f;
+        for (int i = 0; i < 4; i++) {
+            q[i] = qa[i] * wa + qb[i] * wb;
+            length += q[i] * q[i];
+        }
+
+        length = std::sqrt(length);
+        if (!(length > 0.0f)) {
+            return false;
+        }
+
+        lerped.rotation = hlslpp::quaternion(q[0] / length, q[1] / length, q[2] / length, q[3] / length);
+        view = recomposeMatrix(lerped.rotation, lerped.scale, lerped.skew, hlslpp::float3(0.0f, 0.0f, 0.0f), lerped.perspective);
+        setViewEye(view, rigidBody.lerpTranslation ? hlslpp::lerp(prevEye, curEye, weight) : curEye);
+        return true;
     }
 #endif
 
@@ -303,6 +357,23 @@ namespace RT64 {
                 adjustProjectionMatrix(adjustedPrevProj, projRatioScale);
                 viewMatrix = rigidBody->lerp(p.curFrameWeight, *prevViewMatrix, curViewTransform, true);
                 prevViewTransform = rigidBody->lerp(p.prevFrameWeight, *prevViewMatrix, curViewTransform, true);
+#           if RT64_SLERP_CAMERA_ROTATION
+                // Without a matrix group that decomposes the view, RigidBody::lerp lerps its rotation a component at a time,
+                // which shrinks what the two rotations have apart by the cosine of half the angle between them in the frames
+                // between: a camera turning while it looks up or down draws the world shifted and squeezed toward its up axis
+                // there and lets go of it at each game frame, a judder at the game's rate that grows with the square of the
+                // turn (Turok 2, which draws with no matrix group). The view is turned at a constant rate between the two.
+                if (!rigidBody->lerpDecompose && rigidBody->lerpRotation) {
+                    interop::float4x4 slerped;
+                    if (slerpView(*rigidBody, *prevViewMatrix, curViewTransform, p.curFrameWeight, slerped)) {
+                        viewMatrix = slerped;
+                    }
+
+                    if (slerpView(*rigidBody, *prevViewMatrix, curViewTransform, p.prevFrameWeight, slerped)) {
+                        prevViewTransform = slerped;
+                    }
+                }
+#           endif
 
                 // We only interpolate the projection if the view matrix has been interpolated.
                 const bool interpolateProjection = rigidBody->lerpTranslation || rigidBody->lerpRotation;
