@@ -307,12 +307,18 @@ namespace RT64 {
     // look straight down at the cars by rolling about the way they look, turning the picture 86-180 degrees, which left
     // the way they look where it was.
     //
-    // A step of -1 is one that isn't known (measureCameraMove(), worldEyeStep()), and only the turn is judged.
+    // A step of -1 is one that isn't known (measureCameraMove(), worldEyeStep()), and only the turn is judged. A
+    // camera whose step the frame before isn't known (it paired with nothing then, or only its turn was judged) is
+    // taken to have moved 8 near plane distances then, so a jump cuts only past 32 and it isn't taken to have held
+    // still. Taken as 0, it called any jump past 8 a cut: Excitebike 64 draws its riders under projections of their
+    // own, cameras that go with the race 8-15 near plane distances a game frame, and in a race of its a few were cut on
+    // the first game frame they paired again, a rider and the workload's rects drawn without the frames between.
     static bool isCameraCut(float turnCosine, float step, float prevEyeStep) {
         const float MaxTurnCosine = 0.7071f;
         const float MinJump = 8.0f;
         const float MinJumpRatio = 4.0f;
-        if ((turnCosine < MaxTurnCosine) || ((step > MinJump) && (step > (prevEyeStep * MinJumpRatio)))) {
+        const float prevJumpStep = (prevEyeStep >= 0.0f) ? prevEyeStep : MinJump;
+        if ((turnCosine < MaxTurnCosine) || ((step > MinJump) && (step > (prevJumpStep * MinJumpRatio)))) {
             return true;
         }
 
@@ -2334,7 +2340,6 @@ namespace RT64 {
 
 #if RT64_SKIP_CAMERA_CUTS
         CameraMove worldStepCamera;
-        float worldStepPrevEyeStep = -1.0f;
         uint32_t worldStepViewProjIndex = UINT32_MAX;
 #endif
 
@@ -2421,7 +2426,6 @@ namespace RT64 {
                             // world's transforms once they are paired, and judged then.
                             if (move.step < 0.0f) {
                                 worldStepCamera = move;
-                                worldStepPrevEyeStep = prevEyeStep;
                                 worldStepViewProjIndex = curProj.transformsIndex;
                             }
                         }
@@ -2637,11 +2641,18 @@ namespace RT64 {
 
 #if RT64_SKIP_CAMERA_CUTS
         // A camera whose eye the view leaves at the world's origin, judged by the step its world made (worldEyeStep()).
-        // A cut pairs nothing of the scene, as one the view shows does.
+        // A cut pairs nothing of the scene, as one the view shows does. Its step the frame before is judged as one that
+        // isn't known (isCameraCut()), so a jump cuts only past 32 near plane distances and never from rest: what most
+        // transforms moved by alike is the world's step only where most of them stand still in the world. In a race,
+        // where the camera follows a rider, it is the rider's: Excitebike 64's bike and rider, 53-65 transforms against
+        // the track's few that moved alike, went 0.01-1.1 near plane distances a game frame against the camera as the
+        // track went by at 10, so the camera read as holding still, and once or twice a race, in a hard turn, the bike
+        // lurched 8-9.3 against it in one game frame and was called a cut from rest: the whole picture held still for
+        // a game frame and then jumped. Its credits' cut that turns 19 degrees moves the world 49.
         if (worldStepViewProjIndex != UINT32_MAX) {
             GameFrameMap::ViewProjectionMap &viewProjMap = firstCurWorkloadMap.viewProjections[worldStepViewProjIndex];
             viewProjMap.eyeStep = worldEyeStep(matchCandidates, firstCurWorkload.drawData, firstPrevWorkload.drawData, worldStepCamera.rotation, worldStepCamera.nearDistance);
-            if ((viewProjMap.eyeStep >= 0.0f) && isCameraCut(worldStepCamera.turnCosine, viewProjMap.eyeStep, worldStepPrevEyeStep)) {
+            if ((viewProjMap.eyeStep >= 0.0f) && isCameraCut(worldStepCamera.turnCosine, viewProjMap.eyeStep, -1.0f)) {
                 for (const GameIndices::Projection &curProjIndices : curScene.projections) {
                     const Workload &curWorkload = workloadQueue.workloads[curProjIndices.workloadIndex];
                     const Projection &curProj = curWorkload.fbPairs[curProjIndices.fbPairIndex].projections[curProjIndices.projectionIndex];
