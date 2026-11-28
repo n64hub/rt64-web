@@ -1898,10 +1898,11 @@ namespace RT64 {
                                 ((size_t(call.meshDesc.rawVertexStart) + 6) * 2 <= drawData.triTcFloats.size()))
                             {
                                 const float *rectTc = &drawData.triTcFloats[size_t(call.meshDesc.rawVertexStart) * 2];
-                                auto lastTexel = [](float first, float far, int16_t step) {
+                                // Not named far: Windows' minwindef.h defines far and near empty.
+                                auto lastTexel = [](float first, float edge, int16_t step) {
                                     const float stepTexels = fabsf(float(step)) / 1024.0f;
-                                    const float span = far - first;
-                                    return (fabsf(span) <= stepTexels) ? first : (far - copysignf(stepTexels, span));
+                                    const float span = edge - first;
+                                    return (fabsf(span) <= stepTexels) ? first : (edge - copysignf(stepTexels, span));
                                 };
 
                                 const float lastU = lastTexel(rectTc[0], rectTc[6], call.callDesc.rectDsdx);
